@@ -8,7 +8,7 @@ Replication code and supporting data for the manuscript "Indirect effect of infl
 - `01_Fig1/` — Code for Figure 1.
 - `02_Fig2_4/` — Code for Figures 2–4, including Empirical Dynamic Modeling (EDM) analyses.
 - `03_Fig5/` — Code for Figure 5, including Integrated Nested Laplace Approximation (INLA) and Distributed Lag Nonlinear Model (DLNM) analyses.
-- `04_Extended_analysis/` — Code for supplementary and sensitivity analyses.
+- `04_Extended_analysis/` — Code for supplementary analyses.
 
 ## Software and Required Packages
 
