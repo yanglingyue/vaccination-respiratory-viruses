@@ -1,0 +1,146 @@
+---
+title: "Indirect effect of influenza vaccination coverage on the circulation of respiratory viruses"   
+subtitle: "Supplementary Figure 18. Observed versus posterior predictive activity of other respiratory viruses across countries during the post-pandemic period"
+output: html_document
+---
+
+```{r}
+packages <- c( "tidyverse","ggpubr")
+lapply(packages, library, character.only = TRUE)
+
+file_path <- "01.output_post_pandemic_IAV"
+dir.create(file_path)
+
+plot_order <- c("RSV", "PIV", "RV", "ADV", "HMPV")
+virus_vars <- c("ADV", "HMPV", "PIV", "RSV","RV")
+```
+
+## Prepare and save posterior predictive results
+```{r eval=FALSE}
+if (FALSE) {
+plot_pred_list <- list()
+for (j in 1:length(virus_vars))
+{
+print(virus_vars[j]) 
+################################################################################################################################  
+# load packages and pre-processed data
+source("00_post_load_packages_data.R")
+  
+fig_out <- paste0(file_path,"/",j,".",virus_vars[j],"_figs")
+dir.create(fig_out)
+
+# Load cross-validated posterior predictive summaries.  
+data$pred.mean <- NA
+data$pred.median <- NA
+data$pred.lci <- NA
+data$pred.uci <- NA
+pred_out <- paste0(file_path,"/",j,".",virus_vars[j],"_preds")
+
+for (yyear in 1:2)
+{
+  
+  for(mmonth in 1:12){
+    
+    load(paste0(pred_out,"/preds_all_",2022 + yyear, "_",mmonth, ".RData"))
+    data$pred.mean[preds$idx.pred] <- preds$mean
+    data$pred.median[preds$idx.pred] <- preds$median
+    data$pred.lci[preds$idx.pred] <- preds$lci
+    data$pred.uci[preds$idx.pred] <- preds$uci
+  }
+}
+
+# Retain variables required for posterior predictive analysis
+plot_pred_list[[virus_vars[j]]] <- data %>%
+  dplyr::select(year_decimal, country, cases_cases, cases_year,
+    pred.mean, pred.lci, pred.uci)
+}
+# Save precomputed posterior predictive data
+saveRDS(plot_pred_list,"preds_virus_postCOVID.rds",compress = "xz")
+}
+```
+
+## Load precomputed posterior predictive results
+```{r}
+# Load saved results to avoid time-consuming reanalysis
+plot_pred_list <- readRDS("preds_virus_postCOVID.rds")
+```
+
+## Plot Supplementary Figure S18
+```{r fig.width=9.45, fig.height=10, dpi=300, warning=FALSE, message=FALSE}
+plot_list <- list()
+plot_rows <- numeric()
+n_col <- 9
+
+for (j in 1:length(virus_vars)) {
+# Load posterior predictive data for each virus
+data <- plot_pred_list[[virus_vars[j]]]
+# Prepare data for plotting 
+plot_dat <-data %>% 
+  group_by(year_decimal, country) %>%
+  summarise(cases = mean(cases_cases),
+            fit = mean(pred.mean), 
+            fit.lci = mean(pred.lci),
+            fit.uci = mean(pred.uci),
+            cases_year_sum = mean(cases_year)) %>% 
+  # Calculate observed and posterior predictive RP (%)
+  mutate( inc = ifelse(cases_year_sum == 0, NA, cases / cases_year_sum * 10^2),
+          inc.fit = ifelse(cases_year_sum == 0, NA, fit / cases_year_sum * 10^2),
+          inc.fit.lci = ifelse(cases_year_sum == 0, NA, fit.lci / cases_year_sum * 10^2),
+          inc.fit.uci = ifelse(cases_year_sum == 0, NA, pmin(fit.uci / cases_year_sum * 10^2, 100)))
+
+print(max(plot_dat$inc, na.rm = TRUE))
+print(max(plot_dat$inc.fit, na.rm = TRUE))
+print(max(plot_dat$inc.fit.uci, na.rm = TRUE))
+
+# plot observed vs posterior predictive virus activity across countries 
+# Set Y-axis limits and intervals for each virus
+y_max <- c(ADV = 50, HMPV = 100, PIV = 80, RSV = 100, RV = 50)
+
+y_by <- c(ADV = 25, HMPV = 50, PIV = 40, RSV = 50, RV = 25)
+
+AAP_ts_country <- ggplot(plot_dat) + 
+  geom_ribbon(aes(x = year_decimal, ymin = inc.fit.lci, ymax = inc.fit.uci), fill = "#D37295", alpha = 0.5) + 
+  geom_line(aes(x = year_decimal, y = inc.fit, col = "#D37295"),linewidth=0.8) +
+  geom_point(aes(x = year_decimal, y = inc, col = "#499894"),  size=0.8) +
+  xlab("") +
+  ylab(paste0("RP of ",virus_vars[j]," detections (%)"))+
+  scale_colour_identity(name = "",breaks = c("#499894", "#D37295"),labels = c("Observed", "Posterior predicted"),
+                        guide = "legend") +
+  scale_x_continuous(breaks = seq(2023, 2025, 1)) +
+  scale_y_continuous(limits = c(0, y_max[virus_vars[j]]),breaks = seq(0, y_max[virus_vars[j]], by = y_by[virus_vars[j]])) +
+  theme_bw() + 
+  theme(text = element_text(family = "Arial"),
+        axis.text = element_text(size = 8),axis.title = element_text(size = 8),
+        strip.text = element_text(size = 8, margin = margin(t = 1, b = 1)),
+        axis.text.x = element_text(angle = 90,hjust = 0.5,vjust = 0.5),
+        plot.title = element_text(size = 10, face = "bold",family = "Arial"),
+        #panel.spacing = unit(0.8, "lines"),
+        legend.position = "bottom") +
+  theme(panel.grid = element_blank())+
+  ggtitle(paste0("Post-COVID-19 pandemic: ",virus_vars[j]))+
+  facet_wrap(~country,scales = "fixed", ncol = n_col)
+AAP_ts_country
+
+# Store plot
+plot_list[[virus_vars[j]]] <- AAP_ts_country
+
+# Number of facet rows for each virus
+plot_rows[virus_vars[j]] <- ceiling(
+  length(unique(plot_dat$country)) / n_col
+)
+
+}
+
+heights_use <- plot_rows + 0.8
+heights_use[c("RV","HMPV")] <- heights_use[c("RV","HMPV")] + 0.2
+
+# Combine plots for Supplementary Figure S18 (post-COVID-19)
+figS18 <- ggarrange(plotlist = plot_list[plot_order],
+                    ncol = 1,nrow = length(plot_order),
+                    heights = heights_use[plot_order],
+                    common.legend = TRUE,legend = "bottom",align = "v")
+figS18
+
+ggsave(figS18,filename = "FigS18.pdf", device = cairo_pdf, family = "Arial", 
+       width = 24,height = sum(plot_rows) * 1.8 + 2,units = "cm")
+```

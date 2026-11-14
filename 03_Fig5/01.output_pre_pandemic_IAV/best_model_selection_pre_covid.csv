@@ -1,0 +1,6 @@
+Model,DIC,logscore,waic,p_eff,name,virus,num_best_fit
+flua+temp+ahum,9160.02,4.357,9144.28,72.26,model_3.1,ADV,7
+flua+temp+ahum,6648.91,4.082,6641.94,102.93,model_3.1,HMPV,7
+flua+temp+ahum,10279.94,4.116,10269.64,73.04,model_3.1,PIV,7
+flua+temp+ahum,19101.65,4.445,19115.35,204.94,model_3.1,RSV,7
+flua+temp+ahum_POP,8507.37,5.204,8490.87,41.9,model_4.2,RV,14
