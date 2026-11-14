@@ -1,0 +1,347 @@
+#  Supplementary Figure 3: Bivariate correlations between influenza and other respiratory viruses during the pre-COVID-19 period (2016–2019)
+## Load packages and data
+```{r Load package}
+library(Kendall);library(psych);
+library(dplyr);library(tidyverse);library(tidyr);
+library(lubridate);library(ggpubr);library(ggplot2)
+dat <- read.csv("../00_data/multi_vaccine_indirect_precovid19.csv")
+
+position <- read.csv("../00_data/lat_lon.csv")
+colnames(position) <-c ("country","lon","lat")
+position[which(position$country=="United Kingdom, England"),"country"] <- "UK, England"
+position[which(position$country=="United Kingdom, Scotland"),"country"] <- "UK, Scotland"
+position[which(position$country=="United Kingdom, Wales"),"country"] <- "UK, Wales"
+position[which(position$country=="United Kingdom, Northern Ireland"),"country"] <- "UK, Northern Ireland"
+source("../plot_theme.R")
+
+out_path1 <- paste0("FigS3")
+dir.create(out_path1)
+dat <- as.data.frame(dat)
+dat$year <- as.numeric(dat$year)
+dat <- dat[which(dat$year >= 2016 & dat$year <= 2019), ]
+dat[which(dat$country=="United Kingdom, England"),"country"] <- "UK, England"
+dat[which(dat$country=="United Kingdom, Scotland"),"country"] <- "UK, Scotland"
+dat[which(dat$country=="United Kingdom, Wales"),"country"] <- "UK, Wales"
+dat[which(dat$country=="United Kingdom, Northern Ireland"),"country"] <- "UK, Northern Ireland"
+
+```
+
+
+#Bivariate correlations between influenza and other respiratory viruses
+```{r spearman_correlation}
+virus_name<- unique(dat$virus)
+n = length(virus_name)
+cor_virus <- data.frame()
+
+# Define number of permutations
+num_permutations <- 1000
+
+for (i in c(1:n)){
+  print(virus_name[i])
+  dat_virus <-  subset(dat ,dat$virus==virus_name[i])
+  dat_virus<- dat_virus[order(dat_virus$country,dat_virus$year_decimal,decreasing=F),]
+  cntry_name<- unique(dat_virus$country)
+  R_virus <-data.frame()
+  for (j in c(1:length(cntry_name)))
+    {
+    R <- matrix(NA, nrow = 1,ncol = 18)
+    R <- as.data.frame(R)
+    colnames(R)<- c("all_cor","all_p","all_lowci","all_highci",
+                    "flua_cor","flua_p","flua_lowci","flua_highci",
+                    "flub_cor","flub_p","flub_lowci","flub_highci",
+                    "all_ranlow","all_ranhigh","flua_ranlow",
+                    "flua_ranhigh","flub_ranlow","flub_ranhigh")
+    dat_cntry <-  subset(dat_virus ,dat_virus$country==cntry_name[j])
+    
+    # Calculate Spearman correlations between influenza and other respiratory viruses
+    res_all <- corr.test(dat_cntry$flu_AAP, dat_cntry$AAP, method = "spearman", ci = TRUE)
+    #res_all <- corr.test(dat_cntry$flu_AAP, dat_cntry$AAP, method = "kendall", ci = TRUE)
+
+    R[1,"all_cor"] <- res_all$r
+    R[1,"all_p"] <- res_all$p
+    R[1,"all_lowci"] <- res_all$ci[1]
+    R[1,"all_highci"] <- res_all$ci[3]
+    
+    res_flua <- corr.test(dat_cntry$fluA_AAP, dat_cntry$AAP, method = "spearman", ci = TRUE)
+    R[1,"flua_cor"] <- res_flua$r
+    R[1,"flua_p"] <- res_flua$p
+    R[1,"flua_lowci"] <- res_flua$ci[1]
+    R[1,"flua_highci"] <- res_flua$ci[3]
+    
+    res_flub <- corr.test(dat_cntry$fluB_AAP, dat_cntry$AAP, method = "spearman", ci = TRUE)
+    R[1,"flub_cor"] <- res_flub$r
+    R[1,"flub_p"] <- res_flub$p
+    R[1,"flub_lowci"] <- res_flub$ci[1]
+    R[1,"flub_highci"] <- res_flub$ci[3]
+    
+    # Perform random permutation for null hypothesis
+    perm_cor_all <- numeric(num_permutations)
+    perm_cor_flua <- numeric(num_permutations)
+    perm_cor_flub <- numeric(num_permutations)
+    
+    for (perm in 1:num_permutations) {
+      # Randomly permute the virus prevalence time series (both X and Y)
+      perm_dat <- dat_cntry
+      perm_dat$flu_AAP <- sample(perm_dat$flu_AAP)  # Randomize flu_AAP
+      perm_dat$AAP <- sample(perm_dat$AAP)  # Randomize AAP
+      perm_res_all <- corr.test(perm_dat$flu_AAP, perm_dat$AAP, method = "spearman")
+      perm_cor_all[perm] <- perm_res_all$r
+      
+      perm_dat$fluA_AAP <- sample(perm_dat$fluA_AAP)  # Randomize fluA_AAP
+      perm_res_flua <- corr.test(perm_dat$fluA_AAP, perm_dat$AAP, method = "spearman")
+      perm_cor_flua[perm] <- perm_res_flua$r
+      
+      perm_dat$fluB_AAP <- sample(perm_dat$fluB_AAP)  # Randomize fluB_AAP
+      perm_res_flub <- corr.test(perm_dat$fluB_AAP, perm_dat$AAP, method = "spearman")
+      perm_cor_flub[perm] <- perm_res_flub$r
+    }
+     
+    # Compute quantiles from the permutation distribution
+    R[1, "all_ranlow"] <- quantile(perm_cor_all, 0.025)
+    R[1, "all_ranhigh"] <- quantile(perm_cor_all, 0.975)
+    
+    R[1, "flua_ranlow"] <- quantile(perm_cor_flua, 0.025)
+    R[1, "flua_ranhigh"] <- quantile(perm_cor_flua, 0.975)
+    
+    R[1, "flub_ranlow"] <- quantile(perm_cor_flub, 0.025)
+    R[1, "flub_ranhigh"] <- quantile(perm_cor_flub, 0.975)
+    
+    # Add country and virus information to the results
+    R$country <- cntry_name[j]
+    R$virus <- virus_name[i]
+
+    R_virus <- rbind(R_virus,R)
+    }
+  cor_virus <- rbind(cor_virus,R_virus)
+}
+```
+
+## Plot Spearman correlation results for IV
+```{r,plot_spearman_correlation_IV, fig.width=10.5, fig.height=12, dpi=300}
+write.csv(cor_virus,paste0(out_path1,"/cor_result.csv"),row.names = F)
+cor_virus1 <- cor_virus
+cor_virus <- cor_virus[cor_virus$virus %in% c("INF_ALL", "INF_A", "INF_B", "RSV", 
+                                                   "PIV", "RV", "ADV", "HMPV"), ]
+# Create all combinations of viruses and countries
+all_combinations <- expand_grid(
+    virus = unique(cor_virus$virus),
+    country = unique(cor_virus$country)
+)
+
+# Merge correlation results with all combinations
+cor_virus <- merge(all_combinations, cor_virus, by = c("virus", "country"), all.x = TRUE)
+cor_virus$virus <- factor(cor_virus$virus,
+                               levels = c("INF_ALL","INF_A","INF_B",
+                                          "RSV","PIV","RV","ADV","HMPV","HCoV"),ordered=TRUE)
+
+cor_flu_all <- cor_virus[,c("virus","country","all_cor","all_p","all_lowci","all_highci", 
+                            "all_ranlow","all_ranhigh" )]
+cor_flu_all$fill_all <- with(cor_flu_all, ifelse(all_p > 0.05, "NS", 
+                                    ifelse(all_cor > 0, "Positive", "Negative")))
+
+# Format P-values for plotting
+cor_flu_all$cor_p <- ifelse(cor_flu_all$all_p < 0.01, 
+                           "p<0.01", sprintf("%.2f", cor_flu_all$all_p))
+cor_flu_all$country <- factor(cor_flu_all$country,
+                       levels = position$country[order(position$lat, decreasing = F)],ordered=TRUE)
+
+p1_IV <- ggplot(cor_flu_all, aes(virus,country)) +
+    geom_tile(aes(fill=fill_all),color = "black",size=0.1, alpha=0.75) +
+    scale_fill_manual(values = c("NS" = "gray75", "Positive" = "#dc3637", "Negative" = "#377eb8"),
+                       na.value = "white")+
+    labs(title ="IV" ,x="",y="") + 
+    geom_text(aes(label = cor_p), size = 5, color = "black", na.rm = TRUE) +
+    scale_x_discrete(expand = c(0, 0))+
+    mytheme+
+      theme(axis.text.x = element_text(size = 20, color="black",vjust = 0.5,hjust = 0.5, angle = 0),
+            strip.text = element_text(size = 20, face = "bold"))+
+    theme(legend.key.size = unit(1.5,"cm"),legend.key.width = unit(1.5,"cm"),
+          legend.key.height  = unit(0.5,"cm"),legend.position = c("bottom"))+
+    theme(plot.margin=unit(c(1,1,0.25,0.5),'lines'),
+          panel.border = element_rect(colour = "black", fill=NA, size=1))+
+    theme(panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+          panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank())+ 
+    guides(fill = guide_legend(title = NULL))
+
+  p1_IV 
+
+
+cor_flu_all$cor_value <- paste0(round(cor_flu_all$all_cor,2)," (",round(cor_flu_all$all_ranlow,2),",",
+                                round(cor_flu_all$all_ranhigh,2),")")  
+cor_flu_all[which(is.na(cor_flu_all$cor_p)),"cor_value"] <- NA
+cor_flu_all$country <- factor(cor_flu_all$country,
+                       levels = position$country[order(position$lat, decreasing = F)],ordered=TRUE)
+
+p2_IV <- ggplot(cor_flu_all, aes(virus,country)) +
+    geom_tile(aes(fill=fill_all),color = "black",size=0.1,alpha=0.75) +
+    scale_fill_manual(values = c("NS" = "gray75", "Positive" = "#dc3637", "Negative" = "#377eb8"),
+                       na.value = "white")+
+    labs(title ="IV" ,x="",y="") + 
+    geom_text(aes(label = cor_value), size = 3.5, color = "black", na.rm = TRUE) +
+    scale_x_discrete(expand = c(0, 0))+
+    mytheme+
+    theme(axis.text.x = element_text(size = 20, color="black",vjust = 0.5,hjust = 0.5, angle = 0),
+            strip.text = element_text(size = 20, face = "bold"))+
+    theme(legend.key.size = unit(1.5,"cm"),legend.key.width = unit(1.5,"cm"),
+          legend.key.height  = unit(0.5,"cm"),legend.position = c("bottom"))+
+    theme(plot.margin=unit(c(1,1,0.25,0.5),'lines'),
+          panel.border = element_rect(colour = "black", fill=NA, size=1))+
+   theme(panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+          panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank())+
+   guides(fill = guide_legend(title = NULL))
+  p2_IV 
+  
+
+```
+
+
+## Plot Spearman correlation results for IAV
+```{r,plot_spearman_correlation_IAV, fig.width=10.5, fig.height=12, dpi=300}
+
+cor_flu_a <- cor_virus[,c("virus","country","flua_cor","flua_p","flua_lowci","flua_highci", 
+                            "flua_ranlow","flua_ranhigh" )]
+cor_flu_a$fill_flua <- with(cor_flu_a, ifelse(flua_p > 0.05, "NS", 
+                                    ifelse(flua_cor > 0, "Positive", "Negative")))
+
+# Format P-values for plotting
+cor_flu_a$cor_p <- ifelse(cor_flu_a$flua_p < 0.01, 
+                           "p<0.01", sprintf("%.2f", cor_flu_a$flua_p))
+cor_flu_a$country <- factor(cor_flu_a$country,
+                       levels = position$country[order(position$lat, decreasing = F)],ordered=TRUE)
+p1_IAV <- ggplot(cor_flu_a, aes(virus,country)) +
+    geom_tile(aes(fill=fill_flua),color = "black",size=0.1, alpha=0.75) +
+    scale_fill_manual(values = c("NS" = "gray75", "Positive" = "#dc3637", "Negative" = "#377eb8"),
+                       na.value = "white")+
+    labs(title ="IAV" ,x="",y="") + 
+    geom_text(aes(label = cor_p), size = 5, color = "black", na.rm = TRUE) +
+    scale_x_discrete(expand = c(0, 0))+
+    mytheme+
+    theme(axis.text.x = element_text(size = 20, color="black",vjust = 0.5,hjust = 0.5, angle = 0),
+            strip.text = element_text(size = 20, face = "bold"))+
+    theme(legend.key.size = unit(1.5,"cm"),legend.key.width = unit(1.5,"cm"),
+          legend.key.height  = unit(0.5,"cm"),legend.position = c("bottom"))+
+    theme(plot.margin=unit(c(1,1,0.25,0.5),'lines'),
+          panel.border = element_rect(colour = "black", fill=NA, size=1))+
+    theme(panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+          panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank())+ 
+    guides(fill = guide_legend(title = NULL))
+
+  p1_IAV 
+  
+
+cor_flu_a$cor_value <- paste0(round(cor_flu_a$flua_cor,2)," (",round(cor_flu_a$flua_ranlow,2),",",
+                                round(cor_flu_a$flua_ranhigh,2),")")  
+cor_flu_a[which(is.na(cor_flu_a$cor_p)),"cor_value"] <- NA
+
+p2_IAV <- ggplot(cor_flu_a, aes(virus,country)) +
+    geom_tile(aes(fill=fill_flua),color = "black",size=0.1, alpha=0.75) +
+    scale_fill_manual(values = c("NS" = "gray75", "Positive" = "#dc3637", "Negative" = "#377eb8"),
+                       na.value = "white")+
+    labs(title ="IAV" ,x="",y="") + 
+    geom_text(aes(label = cor_value), size = 3.5, color = "black", na.rm = TRUE) +
+    scale_x_discrete(expand = c(0, 0))+
+    mytheme+
+    theme(axis.text.x = element_text(size = 20, color="black",vjust = 0.5,hjust = 0.5, angle = 0),
+            strip.text = element_text(size = 20, face = "bold"))+
+    theme(legend.key.size = unit(1.5,"cm"),legend.key.width = unit(1.5,"cm"),
+          legend.key.height  = unit(0.5,"cm"),legend.position = c("bottom"))+
+    theme(plot.margin=unit(c(1,1,0.25,0.5),'lines'),
+          panel.border = element_rect(colour = "black", fill=NA, size=1))+
+   theme(panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+          panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank())+
+   guides(fill = guide_legend(title = NULL))
+  p2_IAV 
+  
+
+```
+
+
+## Plot Spearman correlation results for IBV
+```{r,plot_spearman_correlation_IBV, fig.width=10.5, fig.height=12, dpi=300}
+cor_flu_b <- cor_virus[,c("virus","country","flub_cor","flub_p","flub_lowci","flub_highci", 
+                            "flub_ranlow","flub_ranhigh" )]
+cor_flu_b$fill_flub <- with(cor_flu_b, ifelse(flub_p > 0.05, "NS", 
+                                    ifelse(flub_cor > 0, "Positive", "Negative")))
+
+cor_flu_b$country <- factor(cor_flu_b$country,
+                       levels = position$country[order(position$lat, decreasing = F)],ordered=TRUE)
+
+# Format P-values for plotting
+cor_flu_b$cor_p <- ifelse(cor_flu_b$flub_p < 0.01, 
+                           "p<0.01", sprintf("%.2f", cor_flu_b$flub_p))
+p1_IBV <- ggplot(cor_flu_b, aes(virus,country)) +
+    geom_tile(aes(fill=fill_flub),color = "black",size=0.1, alpha=0.75) +
+    scale_fill_manual(values = c("NS" = "gray75", "Positive" = "#dc3637", "Negative" = "#377eb8"),
+                       na.value = "white")+
+    labs(title ="IBV" ,x="",y="") + 
+    geom_text(aes(label = cor_p), size = 5, color = "black", na.rm = TRUE) +
+    scale_x_discrete(expand = c(0, 0))+
+    mytheme+
+    theme(axis.text.x = element_text(size = 20, color="black",vjust = 0.5,hjust = 0.5, angle = 0),
+            strip.text = element_text(size = 20, face = "bold"))+
+    theme(legend.key.size = unit(1.5,"cm"),legend.key.width = unit(1.5,"cm"),
+          legend.key.height  = unit(0.5,"cm"),legend.position = c("bottom"))+
+    theme(plot.margin=unit(c(1,1,0.25,0.5),'lines'),
+          panel.border = element_rect(colour = "black", fill=NA, size=1))+
+    theme(panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+          panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank())+ 
+    guides(fill = guide_legend(title = NULL))
+
+  p1_IBV 
+
+
+cor_flu_b$cor_value <- paste0(round(cor_flu_b$flub_cor,2)," (",round(cor_flu_b$flub_ranlow,2),",",
+                                round(cor_flu_b$flub_ranhigh,2),")")  
+cor_flu_b[which(is.na(cor_flu_b$cor_p)),"cor_value"] <- NA
+
+
+p2_IBV <- ggplot(cor_flu_b, aes(virus,country)) +
+    geom_tile(aes(fill=fill_flub),color = "black",size=0.1, alpha=0.75) +
+    scale_fill_manual(values = c("NS" = "gray75", "Positive" = "#dc3637", "Negative" = "#377eb8"),
+                       na.value = "white")+
+    labs(title ="IBV" ,x="",y="") + 
+    geom_text(aes(label = cor_value), size = 3.5, color = "black", na.rm = TRUE) +
+   scale_x_discrete(expand = c(0, 0))+
+   mytheme+
+    theme(axis.text.x = element_text(size = 20, color="black",vjust = 0.5,hjust = 0.5, angle = 0),
+            strip.text = element_text(size = 20, face = "bold"))+
+    theme(legend.key.size = unit(1.5,"cm"),legend.key.width = unit(1.5,"cm"),
+          legend.key.height  = unit(0.5,"cm"),legend.position = c("bottom"))+
+    theme(plot.margin=unit(c(1,1,0.25,0.5),'lines'),
+          panel.border = element_rect(colour = "black", fill=NA, size=1))+
+   theme(panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+          panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank())+
+   guides(fill = guide_legend(title = NULL))
+  p2_IBV 
+
+```
+
+
+## Supplementary Figure S3
+```{r,fig.width=21, fig.height=30, dpi=300}
+library(ggpubr)
+figs3<-ggarrange(p1_IAV,p1_IV,p1_IBV,
+                 p2_IAV,p2_IV,p2_IBV,
+                 ncol =3, nrow = 2,widths = c(1,1),
+                labels = c("A","","","B","",""),  vjust=1,align = "hv",
+                font.label = list(size = 24, face = "bold"))
+figs3
+ggsave(figs3,filename = file.path(paste0(out_path1,"/FigS3_cor_pre.pdf")),
+         width = 28,height =24,device   = cairo_pdf,  family   = "Arial")
+```
+
+
+## Proportion of countries with significant correlations with IAV during the pre-COVID-19 period
+```{r proportion_significant_correlations_pre}
+dat_pre <- read.csv("FigS3/cor_result.csv")
+# Calculate the proportion of countries with significant correlations
+prop_sig_pre <- dat_pre %>%
+  group_by(virus) %>%
+  summarise(
+    n_total = n(),
+    n_sig = sum(flua_p < 0.05, na.rm = TRUE),
+    prop_sig = n_sig / n_total
+  )
+
+prop_sig_pre
+```

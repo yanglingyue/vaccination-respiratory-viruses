@@ -1,0 +1,71 @@
+---
+title: "Indirect effect of influenza vaccination coverage on the circulation of respiratory viruses"
+subtitle: "Supplementary Figure 11"
+output: html_document
+---
+## Load packages and set plotting theme
+```{r}
+library(geofacet);library(sf);library(readr);
+library(dplyr);library(ggplot2);library(tidyverse);library(RColorBrewer)
+#setwd("/Users/yly/Desktop/vaccination-respiratory-viruses/04_Extended_analysis")
+source("../plot_theme.R")
+out_path1 <- paste0("FigS11")
+dir.create(out_path1)
+position <- read.csv("../00_data/lat_lon.csv")
+colnames(position) <-c ("country","lon","lat")
+position[which(position$country=="United Kingdom, England"),"country"] <- "UK, England"
+position[which(position$country=="United Kingdom, Scotland"),"country"] <- "UK, Scotland"
+position[which(position$country=="United Kingdom, Wales"),"country"] <- "UK, Wales"
+position[which(position$country=="United Kingdom, Northern Ireland"),"country"] <- "UK, Northern Ireland"
+```
+
+## Prepare and save time series of AIVC 2016-2024
+```{r eval=FALSE}
+if (FALSE) {
+dat1 <- read.csv("../00_data/multi_vaccine_cases_climate.csv")
+dat1[which(dat1$country=="United Kingdom, England"),"country"] <- "UK, England"
+dat1[which(dat1$country=="United Kingdom, Scotland"),"country"] <- "UK, Scotland"
+dat1[which(dat1$country=="United Kingdom, Wales"),"country"] <- "UK, Wales"
+dat1[which(dat1$country=="United Kingdom, Northern Ireland"),"country"] <- "UK, Northern Ireland"
+dat1 <- dat1[,c("country","year_decimal","strategy2_general_coverage", "strategy2_coverage")]
+
+# Save estimated monthly AIVC time-series data
+saveRDS(dat1,"../00_data/ts_AIVC.rds",compress = "xz")
+}
+```
+
+## Load saved data 
+```{r}
+dat1 <- readRDS("../00_data/ts_AIVC.rds")
+```
+
+## Plot
+```{r fig.width=25, fig.height=15, dpi=300}
+dat1$country <- factor(dat1$country,
+                     levels = position$country[order(position$lat, decreasing = T)],ordered=TRUE)
+
+p1<- ggplot(dat1, aes(x = year_decimal, y =strategy2_coverage ,group=1)) +
+  geom_line(aes(x= year_decimal, y =strategy2_coverage,color = "Elderly population"),size=1,alpha=1)+
+  geom_line(aes(x= year_decimal, y = strategy2_general_coverage, color = "General population"),size=1,alpha=1)+
+  scale_x_continuous(limits =  c(2016,2025),expand = c(0, 0.5),
+                     minor_breaks = seq(2016, 2024, by = 1/12),
+                     breaks =c(2016, 2020,2024))+
+  facet_wrap(~ country, scales = "free_x",nrow = 5) +
+  
+  labs(title = "",x = "Year",y = "Estimated monthly AIVC") +
+  mytheme +
+  theme(axis.title.y.left = element_text( margin = margin(0,0.4,0,0,'cm')))+
+  theme(panel.spacing = unit(2, "lines"),
+        panel.grid.major.y=element_blank(),
+        strip.text = element_text(size = 16, face = "bold"),
+        plot.margin = unit(c(1.5, 1.5, 1.5, 1.5), "cm")) + 
+  scale_color_manual("",values = c( "General population" = "black","Elderly population" = "gray50"),
+                        labels = c("AIVC among general population",
+                                   "AIVC among elderly population")) + 
+  guides(fill=guide_legend(nrow=3,byrow = T))
+
+p1
+
+ggsave(p1,filename = file.path(paste0(out_path1,"/FigS11_AIVC.pdf",sep="")),
+       bg = "white",width = 25,height =15,device   = cairo_pdf,  family   = "Arial")
+```

@@ -1,0 +1,634 @@
+---
+title: "Indirect effect of influenza vaccination coverage on the circulation of respiratory viruses"   
+subtitle: "Pre-COVID-19 period (2016–2019): Fig.2, Supplementary Figs.S12 and S13"
+output: html_document
+---
+
+If necessary, we can clear the environment to start with a clean workspace.
+```{r chunk1}
+rm(list=ls())
+```
+
+Load packages.
+```{r packages, warning=FALSE, message=FALSE}
+source("01_load_package.R")
+library('ggbeeswarm')
+```
+
+Set the drawing theme.
+```{r chunk2}
+source("02_plot_theme.R")
+out_path1 <- "02_output/Fig2_precovid"
+dir.create(out_path1)
+```
+
+
+## Prepare and save CCM data for subsequent analyses
+```{r eval=FALSE}
+# Load and merge country-level CCM results
+if (FALSE) {
+path <- "02_output/02_CCM/02_single_CCM/01_single_CCM_country_result"
+file_list <- list.files(path = path, pattern = "\\.csv$", full.names = TRUE)
+
+ccm_all <- do.call(rbind, lapply(file_list, function(file) {
+  read.csv(file, stringsAsFactors = FALSE)
+}))
+
+
+# Set negative cross-mapping skill values to zero
+ccm_all[ccm_all$rho_surr<0,"rho_surr"] <- 0
+ccm_all[ccm_all$rho_actual<0,"rho_actual"] <- 0
+
+
+# Retain data required for significance analysis and plotting
+ccm_all <- ccm_all %>%
+  dplyr::filter(method %in% c("Seasonal", "Ebisuzaki")) %>%
+  dplyr::select(
+    country, RVI_type, RVI_type1,
+    rho_actual, rho_surr,
+    Kendall_tau, Kendall_p,
+    p_sign, method
+  )
+
+# Save processed CCM data
+saveRDS(
+  ccm_all,
+  file.path("02_output/CCM_preCOVID_plot_input.rds"),
+  compress = "xz"
+)
+}
+```
+
+## Load precomputed CCM results
+```{r}
+# Load saved CCM results to avoid time-consuming reanalysis
+ccm_all <- readRDS("02_output/CCM_preCOVID_plot_input.rds")
+```
+
+
+## Calculate CCM significance using surrogate tests
+```{r}
+library(dplyr)
+library(poolr);
+
+climate_vars <- unique(ccm_all$RVI_type)
+ccm_all1 <- ccm_all%>% 
+  filter(RVI_type %in% climate_vars)
+ccm_obs <- ccm_all1[,c("country","RVI_type","rho_actual","Kendall_tau","Kendall_p")]
+ccm_obs <- ccm_obs %>%
+    distinct() 
+ccm_sea <- subset(ccm_all1, method == "Seasonal")
+ccm_ebi <- subset(ccm_all1, method == "Ebisuzaki")
+ccm_ran <- subset(ccm_all1, method == "Random")
+
+t.p_sea_df <- data.frame()
+t.p_ebi_df <- data.frame()
+
+for (i in 1:length(climate_vars)) {
+  
+  obs_RVI <- subset(ccm_obs, RVI_type == climate_vars[i])
+  sea_RVI <- subset(ccm_sea, RVI_type == climate_vars[i])
+  ebi_RVI <- subset(ccm_ebi, RVI_type == climate_vars[i])
+
+  country_vars <- unique(obs_RVI$country)
+
+  for (j in 1:length(country_vars)) {
+    obs <- subset(obs_RVI,  country == country_vars[j])
+    sea <- subset(sea_RVI,  country == country_vars[j])
+    ebi <- subset(ebi_RVI,  country == country_vars[j])
+  
+    t.p_obs.sea <- t.test(sea$rho_surr, mu = obs$rho_actual, alternative = "less")[["p.value"]]
+    t.p_obs.ebi <- t.test(ebi$rho_surr, mu = obs$rho_actual, alternative = "less")[["p.value"]]
+    ccm_obs$t.p_sea[ccm_obs$RVI_type == climate_vars[i] & ccm_obs$country == country_vars[j]] <- t.p_obs.sea
+    ccm_obs$t.p_ebi[ccm_obs$RVI_type == climate_vars[i] & ccm_obs$country == country_vars[j]] <- t.p_obs.ebi
+  }
+  
+ # If Kendall's tau is negative or observed CCM skill is non-positive, set the p-value to 1
+  ccm_obs[ccm_obs$Kendall_tau<0|ccm_obs$rho_actual<=0,"t.p_sea"] <- 1
+  ccm_obs[ccm_obs$Kendall_tau<0|ccm_obs$rho_actual<=0,"t.p_ebi"] <- 1
+  
+  t.p_sea <-  ccm_obs$t.p_sea[ccm_obs$RVI_type == climate_vars[i]]
+  t.p_ebi <-  ccm_obs$t.p_ebi[ccm_obs$RVI_type == climate_vars[i]]
+  
+  t.p<-c(t.p_sea ,t.p_ebi) 
+
+  # Bonferroni correction
+  t.p_bonferroni<-p.adjust(t.p,method="bonferroni")
+  
+  t.p_sea_bonferroni <-t.p_bonferroni[1:length(t.p_sea)]
+  t.p_ebi_bonferroni <-t.p_bonferroni[c(length(t.p_sea)+1):c(length(t.p_sea)*2)]
+  ccm_obs$t.p_sea_bonferroni[ccm_obs$RVI_type == climate_vars[i]] <-t.p_sea_bonferroni
+  ccm_obs$t.p_ebi_bonferroni[ccm_obs$RVI_type == climate_vars[i]] <-t.p_ebi_bonferroni
+  
+  t.p_sea_df_rvi <- cbind(data.frame(t.p_sea_bonferroni),ccm_obs$RVI_type[ccm_obs$RVI_type == climate_vars[i]])
+  t.p_ebi_df_rvi <- cbind(data.frame(t.p_ebi_bonferroni),ccm_obs$RVI_type[ccm_obs$RVI_type == climate_vars[i]])
+  colnames(t.p_sea_df_rvi)[2] <- "RVI_type"
+  colnames(t.p_ebi_df_rvi)[2] <- "RVI_type"
+
+  t.p_sea_df <- rbind(t.p_sea_df,t.p_sea_df_rvi)
+  t.p_ebi_df <- rbind(t.p_ebi_df,t.p_ebi_df_rvi)
+
+  # Combine Bonferroni-adjusted country-level p-values using Fisher's method
+  fisher_t.p_sea <- as.numeric(fisher(t.p_sea_bonferroni)[1])
+  fisher_t.p_ebi <- as.numeric(fisher(t.p_ebi_bonferroni)[1])
+
+  ccm_obs$fisher_t.p_sea[ccm_obs$RVI_type == climate_vars[i]] <- fisher_t.p_sea
+  ccm_obs$fisher_t.p_ebi[ccm_obs$RVI_type == climate_vars[i]] <- fisher_t.p_ebi
+  
+}
+```
+
+
+## Summarize CCM significance across countries
+```{r}
+options(scipen = 999)
+count_t.p_sea <- vector("numeric", length(climate_vars))
+count_t.p_ebi <- vector("numeric", length(climate_vars))
+fisher_t.p_sea <- vector("numeric", length(climate_vars))
+fisher_t.p_ebi <- vector("numeric", length(climate_vars))
+
+count_t.p_sea[] <- NA
+count_t.p_ebi[] <- NA
+fisher_t.p_sea[] <- NA
+fisher_t.p_ebi[] <- NA
+
+for (i in 1:length(climate_vars)) {
+  t.p_sea <- t.p_sea_df$t.p_sea_bonferroni[t.p_sea_df$RVI_type == climate_vars[i]]
+  t.p_ebi <- t.p_ebi_df$t.p_ebi_bonferroni[t.p_ebi_df$RVI_type == climate_vars[i]]
+ 
+  count_t.p_sea[i] <- sum(t.p_sea < 0.05)
+  count_t.p_ebi[i] <- sum(t.p_ebi < 0.05) 
+  
+  fisher_t.p_sea[i] <- ccm_obs$fisher_t.p_sea[ccm_obs$RVI_type == climate_vars[i]][1]
+  fisher_t.p_ebi[i] <- ccm_obs$fisher_t.p_ebi[ccm_obs$RVI_type == climate_vars[i]][1]
+  
+}
+
+count.p <- data.frame(
+  climate_var = climate_vars,
+  count_t.p_sea,
+  count_t.p_ebi,
+  fisher_t.p_sea,
+  fisher_t.p_ebi
+ 
+)
+
+```
+
+
+## Classify CCM significance based on adjusted p-values
+```{r}
+dat_ccm <- ccm_all[,c("country", "RVI_type" ,"rho_actual","rho_surr","Kendall_tau", "Kendall_p" ,"p_sign", "method", "RVI_type1")]
+dat_ccm_obs <- merge(dat_ccm,ccm_obs,by=c("country","RVI_type","rho_actual","Kendall_tau","Kendall_p"),all.x = T)
+
+dat_ccm_obs_ebi = subset(dat_ccm_obs ,dat_ccm_obs$method=="Ebisuzaki")
+dat_ccm_obs_ebi$p_sign1 <- NULL
+dat_ccm_obs_ebi[dat_ccm_obs_ebi$t.p_ebi_bonferroni<=0.05,"p_sign1"] <- 0
+dat_ccm_obs_ebi[dat_ccm_obs_ebi$t.p_ebi_bonferroni>0.05,"p_sign1"] <- 1
+
+dat_ccm_obs_sea = subset(dat_ccm_obs ,dat_ccm_obs$method=="Seasonal")
+dat_ccm_obs_sea$p_sign1 <- NULL
+dat_ccm_obs_sea[dat_ccm_obs_sea$t.p_sea_bonferroni<=0.05,"p_sign1"] <- 0
+dat_ccm_obs_sea[dat_ccm_obs_sea$t.p_sea_bonferroni>0.05,"p_sign1"] <- 1
+```
+
+## Figure 2: Pre-COVID-19 (IAV)
+```{r,fig.width=7.3, fig.height=6.1, dpi=300}
+ccm_vero_types <- c("Vaccine drives HMPV","INF_A drives HMPV",
+                     "Vaccine drives ADV","INF_A drives ADV",
+                     "Vaccine drives RV","INF_A drives RV",
+                     "Vaccine drives PIV","INF_A drives PIV",
+                     "Vaccine drives RSV","INF_A drives RSV","Vaccine drives INF_A")
+
+plot_ccm_virus_vero <- dat_ccm_obs_ebi[dat_ccm_obs_ebi$RVI_type %in% ccm_vero_types,]
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives RSV"),"RVI_type"] <- "IAV drives RSV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives PIV"),"RVI_type"] <- "IAV drives PIV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives RV"),"RVI_type"] <- "IAV drives RV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives ADV"),"RVI_type"] <- "IAV drives ADV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives HMPV"),"RVI_type"] <- "IAV drives HMPV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives INF_A"),"RVI_type"] <- "AIVC drives IAV"
+
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives RSV"),"RVI_type"] <- "AIVC drives RSV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives PIV"),"RVI_type"] <- "AIVC drives PIV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives RV"),"RVI_type"] <- "AIVC drives RV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives ADV"),"RVI_type"] <- "AIVC drives ADV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives HMPV"),"RVI_type"] <- "AIVC drives HMPV"
+
+ccm_vero_types1 <- c("AIVC drives HMPV","AIVC drives ADV","AIVC drives RV","AIVC drives PIV","AIVC drives RSV","AIVC drives IAV")
+
+plot_ccm_vero <- subset(plot_ccm_virus_vero, RVI_type %in% ccm_vero_types1)
+plot_ccm_vero$RVI_type <- factor(plot_ccm_vero$RVI_type, levels = ccm_vero_types1)
+
+
+custom_colors <- c("#7570b3","#7570b3","#7570b3","#7570b3","#7570b3","#d55e00")
+
+dat_label <- tibble(xpos=c("AIVC drives ADV","AIVC drives HMPV","AIVC drives IAV",
+                            "AIVC drives PIV","AIVC drives RSV","AIVC drives RV"), ypos= rep(-0.35, 6),
+                    lab =c(expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001))) 
+
+plot_ccm_vero1 <- unique(plot_ccm_vero[, c("country", "RVI_type", "rho_actual", "method", 
+                                                        "RVI_type1", "fisher_t.p_sea", "fisher_t.p_ebi", "p_sign1")])
+pc_vero <- ggplot(data=plot_ccm_vero1, aes(x=RVI_type, y=rho_actual,fill=RVI_type)) +
+  geom_boxplot(notch=F, outlier.shape = NA,outlier.size = 1,outlier.fill = "black",
+               color="black",width=0.6,alpha=0.6)+ 
+  geom_quasirandom(data=plot_ccm_vero1,size=4,stroke = 1, width=0.25,  alpha=0.8,
+                   aes(x=RVI_type, y=rho_actual, shape=as.factor(p_sign1))) +
+  labs(title = "",x="",y=expression(paste("Cross mapping skill (",rho,")"))) + 
+  scale_y_continuous(limits = c(-0.6, 1),
+                     breaks = seq(-0.5, 1,0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black",size=1) +
+  scale_shape_manual(name = '',values = c(16, 1),label=c("p < 0.05","p > 0.05")) +
+  scale_fill_manual(name = '', values = custom_colors) + 
+  scale_color_manual(name = '', values = custom_colors) +  
+  mytheme+
+  geom_text(data = dat_label,
+            aes(x = xpos, y = ypos, label = lab), 
+            inherit.aes = FALSE, parse = TRUE, color = 'gray20', size = 6,
+            vjust = 0.5, hjust = 0.5, position = "nudge") +
+  coord_flip()+
+  guides(color = "none",fill = "none") +
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank())
+
+pc_vero
+ggsave(pc_vero ,filename = file.path(paste0(out_path1,"/Fig2A_Ebisuzaki_precovid_vero.pdf")),
+         width = 7.5,height=6.1,device   = cairo_pdf,  family   = "Arial") 
+
+ccm_virus_types1 <- c("IAV drives HMPV", "IAV drives ADV","IAV drives RV", "IAV drives PIV", "IAV drives RSV")
+plot_ccm_virus <- subset(plot_ccm_virus_vero, RVI_type %in% ccm_virus_types1)
+
+plot_ccm_virus$RVI_type <- factor(plot_ccm_virus$RVI_type, levels = ccm_virus_types1)
+
+custom_colors <- c("#4daf4a","#4daf4a","#4daf4a","#4daf4a", "#4daf4a")
+
+dat_label <- tibble(xpos=c("IAV drives ADV","IAV drives HMPV","IAV drives PIV",
+                           "IAV drives RSV","IAV drives RV"), ypos= rep(-0.35, 5),
+                    lab =c(expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001))) 
+
+plot_ccm_virus1 <- unique(plot_ccm_virus[, c("country", "RVI_type", "rho_actual", "method", 
+                                                        "RVI_type1", "fisher_t.p_sea", "fisher_t.p_ebi", "p_sign1")])
+pc_virus <- ggplot(data=plot_ccm_virus1, aes(x=RVI_type, y=rho_actual,fill=RVI_type)) +
+  geom_boxplot(notch=F, outlier.shape = NA,outlier.size = 1,outlier.fill = "black",
+               color="black",width=0.53,alpha=0.6)+ 
+  geom_quasirandom(data=plot_ccm_virus1,size=4,stroke = 1, width=0.25,  alpha=0.8,
+                   aes(x=RVI_type, y=rho_actual, shape=as.factor(p_sign1))) +
+  labs(title = "",x="",y=expression(paste("Cross mapping skill (",rho,")"))) + 
+  scale_y_continuous(limits = c(-0.6, 1),
+                     breaks = seq(-0.5, 1,0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black",size=1) +
+  scale_shape_manual(name = '',values = c(16, 1),label=c("p < 0.05","p > 0.05")) +
+  scale_fill_manual(name = '', values = custom_colors) +  
+  scale_color_manual(name = '', values = custom_colors) +  
+  mytheme+
+  geom_text(data = dat_label,
+            aes(x = xpos, y = ypos, label = lab), 
+            inherit.aes = FALSE, parse = TRUE, color = 'gray20', size = 6,
+            vjust = 0.5, hjust = 0.5, position = "nudge") +
+  coord_flip()+
+  guides(color = "none",fill = "none") +
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank())
+
+pc_virus
+
+ggsave(pc_virus ,filename = file.path(paste0(out_path1,"/Fig2B_Ebisuzaki_precovid_virus.pdf")),
+         width = 7.3,height=6.1,device   = cairo_pdf,  family   = "Arial") 
+```
+
+
+## Supplementary Fig. S12: Pre-COVID-19 (IAV, Seasonal null model)
+```{r,fig.width=7, fig.height=10, dpi=300}
+ccm_vero_types <- c("Vaccine drives HMPV","INF_A drives HMPV",
+                     "Vaccine drives ADV","INF_A drives ADV",
+                     "Vaccine drives RV","INF_A drives RV",
+                     "Vaccine drives PIV","INF_A drives PIV",
+                     "Vaccine drives RSV","INF_A drives RSV","Vaccine drives INF_A")
+
+plot_ccm_virus_vero <- dat_ccm_obs_sea[dat_ccm_obs_sea$RVI_type %in% ccm_vero_types,]
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives RSV"),"RVI_type"] <- "IAV drives RSV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives PIV"),"RVI_type"] <- "IAV drives PIV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives RV"),"RVI_type"] <- "IAV drives RV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives ADV"),"RVI_type"] <- "IAV drives ADV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_A drives HMPV"),"RVI_type"] <- "IAV drives HMPV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives INF_A"),"RVI_type"] <- "AIVC drives IAV"
+
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives RSV"),"RVI_type"] <- "AIVC drives RSV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives PIV"),"RVI_type"] <- "AIVC drives PIV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives RV"),"RVI_type"] <- "AIVC drives RV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives ADV"),"RVI_type"] <- "AIVC drives ADV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives HMPV"),"RVI_type"] <- "AIVC drives HMPV"
+
+ccm_vero_types1 <- c("AIVC drives HMPV","AIVC drives ADV","AIVC drives RV","AIVC drives PIV","AIVC drives RSV","AIVC drives IAV")
+
+plot_ccm_vero <- subset(plot_ccm_virus_vero, RVI_type %in% ccm_vero_types1)
+plot_ccm_vero$RVI_type <- factor(plot_ccm_vero$RVI_type, levels = ccm_vero_types1)
+
+custom_colors <- c("#7570b3","#7570b3","#7570b3","#7570b3","#7570b3","#d55e00")
+
+dat_label <- tibble(xpos=c("AIVC drives ADV","AIVC drives HMPV","AIVC drives IAV",
+                            "AIVC drives PIV","AIVC drives RSV","AIVC drives RV"), ypos= rep(-0.35, 6),
+                    lab =c(expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001))) 
+
+plot_ccm_vero1 <- unique(plot_ccm_vero[, c("country", "RVI_type", "rho_actual", "method", 
+                                                        "RVI_type1", "fisher_t.p_sea", "fisher_t.p_ebi", "p_sign1")])
+pc_vero <- ggplot(data=plot_ccm_vero1, aes(x=RVI_type, y=rho_actual,fill=RVI_type)) +
+  geom_boxplot(notch=F, outlier.shape = NA,outlier.size = 1,outlier.fill = "black",
+               color="black",width=0.6,alpha=0.6)+ 
+  geom_quasirandom(data=plot_ccm_vero1,size=4,stroke = 1, width=0.25,  alpha=0.8,
+                   aes(x=RVI_type, y=rho_actual, shape=as.factor(p_sign1))) +
+  labs(title = "",x="",y=expression(paste("Cross mapping skill (",rho,")"))) + 
+  scale_y_continuous(limits = c(-0.6, 1),
+                     breaks = seq(-0.5, 1,0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black",size=1) +
+  scale_shape_manual(name = '',values = c(16, 1),label=c("p < 0.05","p > 0.05")) +
+  scale_fill_manual(name = '', values = custom_colors) + 
+  scale_color_manual(name = '', values = custom_colors) +  
+  mytheme+
+  geom_text(data = dat_label,
+            aes(x = xpos, y = ypos, label = lab), 
+            inherit.aes = FALSE, parse = TRUE, color = 'gray20', size = 6,
+            vjust = 0.5, hjust = 0.5, position = "nudge") +
+  coord_flip()+
+  guides(color = "none",fill = "none") +
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank())
+
+pc_vero
+ggsave(pc_vero ,filename = file.path(paste0(out_path1,"/FigS12A_Seasonal_precovid_vero.pdf",".pdf")),
+         width = 7.5,height=6.1,device   = cairo_pdf,  family   = "Arial") 
+
+ccm_virus_types1 <- c("IAV drives HMPV", "IAV drives ADV","IAV drives RV", "IAV drives PIV", "IAV drives RSV")
+plot_ccm_virus <- subset(plot_ccm_virus_vero, RVI_type %in% ccm_virus_types1)
+
+plot_ccm_virus$RVI_type <- factor(plot_ccm_virus$RVI_type, levels = ccm_virus_types1)
+
+
+custom_colors <- c("#4daf4a","#4daf4a","#4daf4a","#4daf4a", "#4daf4a")
+
+dat_label <- tibble(xpos=c("IAV drives ADV","IAV drives HMPV","IAV drives PIV",
+                           "IAV drives RSV","IAV drives RV"), ypos= rep(-0.35, 5),
+                    lab =c(expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001))) 
+
+plot_ccm_virus1 <- unique(plot_ccm_virus[, c("country", "RVI_type", "rho_actual", "method", 
+                                                        "RVI_type1", "fisher_t.p_sea", "fisher_t.p_ebi", "p_sign1")])
+pc_virus <- ggplot(data=plot_ccm_virus1, aes(x=RVI_type, y=rho_actual,fill=RVI_type)) +
+  geom_boxplot(notch=F, outlier.shape = NA,outlier.size = 1,outlier.fill = "black",
+               color="black",width=0.53,alpha=0.6)+ 
+  geom_quasirandom(data=plot_ccm_virus1,size=4,stroke = 1, width=0.25,  alpha=0.8,
+                   aes(x=RVI_type, y=rho_actual, shape=as.factor(p_sign1))) +
+  labs(title = "",x="",y=expression(paste("Cross mapping skill (",rho,")"))) + 
+  scale_y_continuous(limits = c(-0.6, 1),
+                     breaks = seq(-0.5, 1,0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black",size=1) +
+  scale_shape_manual(name = '',values = c(16, 1),label=c("p < 0.05","p > 0.05")) +
+  scale_fill_manual(name = '', values = custom_colors) +  
+  scale_color_manual(name = '', values = custom_colors) +  
+  mytheme+
+  geom_text(data = dat_label,
+            aes(x = xpos, y = ypos, label = lab), 
+            inherit.aes = FALSE, parse = TRUE, color = 'gray20', size = 6,
+            vjust = 0.5, hjust = 0.5, position = "nudge") +
+  coord_flip()+
+  guides(color = "none",fill = "none") +
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank())
+
+pc_virus
+
+ggsave(pc_virus ,filename = file.path(paste0(out_path1,"/FigS12B_Seasonal_precovid_virus.pdf",".pdf")),
+         width = 7.3,height=6.1,device   = cairo_pdf,  family   = "Arial") 
+```
+
+
+## Supplementary Fig.S13A_S13C: Pre-COVID-19 (IV and IBV, Ebisuzaki null model)
+```{r,fig.width=7.4, fig.height=10.5, dpi=300}
+ccm_vero_types <- c("INF_ALL drives HMPV","INF_B drives HMPV",
+                    "INF_ALL drives ADV","INF_B drives ADV",
+                    "INF_ALL drives RV","INF_B drives RV",
+                    "INF_ALL drives PIV","INF_B drives PIV",
+                    "INF_ALL drives RSV","INF_B drives RSV",
+                    "Vaccine drives INF_ALL","Vaccine drives INF_B")
+
+plot_ccm_virus_vero <- dat_ccm_obs_ebi[dat_ccm_obs_ebi$RVI_type %in% ccm_vero_types,]
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives RSV"),"RVI_type"] <- "IV drives RSV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives PIV"),"RVI_type"] <- "IV drives PIV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives RV"),"RVI_type"] <- "IV drives RV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives ADV"),"RVI_type"] <- "IV drives ADV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives HMPV"),"RVI_type"] <- "IV drives HMPV"
+
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives RSV"),"RVI_type"] <- "IBV drives RSV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives PIV"),"RVI_type"] <- "IBV drives PIV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives RV"),"RVI_type"] <- "IBV drives RV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives ADV"),"RVI_type"] <- "IBV drives ADV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives HMPV"),"RVI_type"] <- "IBV drives HMPV"
+
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives INF_ALL"),"RVI_type"] <- "AIVC drives IV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives INF_B"),"RVI_type"] <- "AIVC drives IBV"
+
+ccm_vero_types1 <- c("AIVC drives IBV","AIVC drives IV")
+
+plot_ccm_vero <- subset(plot_ccm_virus_vero, RVI_type %in% ccm_vero_types1)
+plot_ccm_vero$RVI_type <- factor(plot_ccm_vero$RVI_type, levels = ccm_vero_types1)
+
+custom_colors <- c("#d55e00","#d55e00")
+dat_label <- tibble(xpos=c("AIVC drives IV","AIVC drives IBV"), ypos= rep(-0.35, 2),
+                    lab =c(expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001))) 
+
+plot_ccm_vero1 <- unique(plot_ccm_vero[, c("country", "RVI_type", "rho_actual", "method", 
+                                                        "RVI_type1", "fisher_t.p_sea", "fisher_t.p_ebi", "p_sign1")])
+pc_vero <- ggplot(data=plot_ccm_vero1, aes(x=RVI_type, y=rho_actual,fill=RVI_type)) +
+  geom_boxplot(notch=F, outlier.shape = NA,outlier.size = 1,outlier.fill = "black",
+               color="black",width=0.6,alpha=0.6)+ 
+  geom_quasirandom(data=plot_ccm_vero1,size=4,stroke = 1, width=0.25,  alpha=0.8,
+                   aes(x=RVI_type, y=rho_actual, shape=as.factor(p_sign1))) +
+  labs(title = "",x="",y=expression(paste("Cross mapping skill (",rho,")"))) + 
+  scale_y_continuous(limits = c(-0.6, 1),
+                     breaks = seq(-0.5, 1,0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black",size=1) +
+  scale_shape_manual(name = '',values = c(16, 1),label=c("p < 0.05","p > 0.05")) +
+  scale_fill_manual(name = '', values = custom_colors) +  
+  scale_color_manual(name = '', values = custom_colors) +  
+  mytheme+
+  geom_text(data = dat_label,
+            aes(x = xpos, y = ypos, label = lab), 
+            inherit.aes = FALSE, parse = TRUE, color = 'gray20', size = 6,
+            vjust = 0.5, hjust = 0.5, position = "nudge") +
+  coord_flip()+
+  guides(color = "none",fill = "none") +
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank())
+
+pc_vero
+ggsave(pc_vero ,filename = file.path(paste0(out_path1,"/FigS13A_Ebisuzaki_precovid_vero.pdf")),
+         width = 7.3,height=3.4,device   = cairo_pdf,  family   = "Arial") 
+
+ccm_virus_types1 <- c("IV drives HMPV", "IV drives ADV","IV drives RV", "IV drives PIV", "IV drives RSV",
+                         "IBV drives HMPV", "IBV drives ADV","IBV drives RV", "IBV drives PIV", "IBV drives RSV")
+plot_ccm_virus <- subset(plot_ccm_virus_vero, RVI_type %in% ccm_virus_types1)
+
+plot_ccm_virus$RVI_type <- factor(plot_ccm_virus$RVI_type, levels = ccm_virus_types1)
+
+custom_colors <- c("#4daf4a","#4daf4a","#4daf4a","#4daf4a", "#4daf4a",
+                   "#4daf4a","#4daf4a","#4daf4a","#4daf4a", "#4daf4a")
+
+dat_label <- tibble(xpos=c("IBV drives ADV","IBV drives HMPV","IBV drives PIV",
+                           "IBV drives RSV","IBV drives RV",
+                           "IV drives ADV","IV drives HMPV","IV drives PIV",
+                           "IV drives RSV","IV drives RV"), ypos= rep(-0.35, 10),
+                    lab =c(expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001))) 
+
+plot_ccm_virus <- unique(plot_ccm_virus[, c("country", "RVI_type", "rho_actual", "method", 
+                                                        "RVI_type1", "fisher_t.p_sea", "fisher_t.p_ebi", "p_sign1")])
+pc_virus <- ggplot(data=plot_ccm_virus, aes(x=RVI_type, y=rho_actual,fill=RVI_type)) +
+  geom_boxplot(notch=F, outlier.shape = NA,outlier.size = 1,outlier.fill = "black",
+               color="black",width=0.53,alpha=0.6)+ 
+  geom_quasirandom(data=plot_ccm_virus,size=4,stroke = 1, width=0.25,  alpha=0.8,
+                   aes(x=RVI_type, y=rho_actual, shape=as.factor(p_sign1))) +
+  labs(title = "",x="",y=expression(paste("Cross mapping skill (",rho,")"))) + 
+  scale_y_continuous(limits = c(-0.6, 1),
+                     breaks = seq(-0.5, 1,0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black",size=1) +
+  scale_shape_manual(name = '',values = c(16, 1),label=c("p < 0.05","p > 0.05")) +
+  scale_fill_manual(name = '', values = custom_colors) + 
+  scale_color_manual(name = '', values = custom_colors) +  
+  mytheme+
+  geom_text(data = dat_label,
+            aes(x = xpos, y = ypos, label = lab), 
+            inherit.aes = FALSE, parse = TRUE, color = 'gray20', size = 6,
+            vjust = 0.5, hjust = 0.5, position = "nudge") +
+  coord_flip()+
+  guides(color = "none",fill = "none") +
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank())
+
+pc_virus
+
+ggsave(pc_virus ,filename = file.path(paste0(out_path1,"/FigS13C_Ebisuzaki_precovid_virus.pdf")),
+         width = 7.4,height=10.5,device   = cairo_pdf,  family   = "Arial") 
+```
+
+
+## Supplementary Fig. S13B_S13D: Pre-COVID-19 (IV and IBV, Seasonal null model)
+```{r,fig.width=7.4, fig.height=10.5, dpi=300}
+ccm_vero_types <- c("INF_ALL drives HMPV","INF_B drives HMPV",
+                    "INF_ALL drives ADV","INF_B drives ADV",
+                    "INF_ALL drives RV","INF_B drives RV",
+                    "INF_ALL drives PIV","INF_B drives PIV",
+                    "INF_ALL drives RSV","INF_B drives RSV",
+                    "Vaccine drives INF_ALL","Vaccine drives INF_B")
+
+plot_ccm_virus_vero <- dat_ccm_obs_sea[dat_ccm_obs_sea$RVI_type %in% ccm_vero_types,]
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives RSV"),"RVI_type"] <- "IV drives RSV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives PIV"),"RVI_type"] <- "IV drives PIV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives RV"),"RVI_type"] <- "IV drives RV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives ADV"),"RVI_type"] <- "IV drives ADV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_ALL drives HMPV"),"RVI_type"] <- "IV drives HMPV"
+
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives RSV"),"RVI_type"] <- "IBV drives RSV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives PIV"),"RVI_type"] <- "IBV drives PIV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives RV"),"RVI_type"] <- "IBV drives RV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives ADV"),"RVI_type"] <- "IBV drives ADV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="INF_B drives HMPV"),"RVI_type"] <- "IBV drives HMPV"
+
+
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives INF_ALL"),"RVI_type"] <- "AIVC drives IV"
+plot_ccm_virus_vero[which(plot_ccm_virus_vero$RVI_type=="Vaccine drives INF_B"),"RVI_type"] <- "AIVC drives IBV"
+
+ccm_vero_types1 <- c("AIVC drives IBV","AIVC drives IV")
+
+plot_ccm_vero <- subset(plot_ccm_virus_vero, RVI_type %in% ccm_vero_types1)
+plot_ccm_vero$RVI_type <- factor(plot_ccm_vero$RVI_type, levels = ccm_vero_types1)
+
+
+custom_colors <- c("#d55e00","#d55e00")
+
+dat_label <- tibble(xpos=c("AIVC drives IV","AIVC drives IBV"), ypos= rep(-0.35, 2),
+                    lab =c(expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001))) 
+
+plot_ccm_vero1 <- unique(plot_ccm_vero[, c("country", "RVI_type", "rho_actual", "method", 
+                                                        "RVI_type1", "fisher_t.p_sea", "fisher_t.p_ebi", "p_sign1")])
+pc_vero <- ggplot(data=plot_ccm_vero1, aes(x=RVI_type, y=rho_actual,fill=RVI_type)) +
+  geom_boxplot(notch=F, outlier.shape = NA,outlier.size = 1,outlier.fill = "black",
+               color="black",width=0.6,alpha=0.6)+ 
+  geom_quasirandom(data=plot_ccm_vero1,size=4,stroke = 1, width=0.25,  alpha=0.8,
+                   aes(x=RVI_type, y=rho_actual, shape=as.factor(p_sign1))) +
+  labs(title = "",x="",y=expression(paste("Cross mapping skill (",rho,")"))) + 
+  scale_y_continuous(limits = c(-0.6, 1),
+                     breaks = seq(-0.5, 1,0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black",size=1) +
+  scale_shape_manual(name = '',values = c(16, 1),label=c("p < 0.05","p > 0.05")) +
+  scale_fill_manual(name = '', values = custom_colors) +  
+  scale_color_manual(name = '', values = custom_colors) + 
+  mytheme+
+  geom_text(data = dat_label,
+            aes(x = xpos, y = ypos, label = lab), 
+            inherit.aes = FALSE, parse = TRUE, color = 'gray20', size = 6,
+            vjust = 0.5, hjust = 0.5, position = "nudge") +
+  coord_flip()+
+  guides(color = "none",fill = "none") +
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank())
+
+pc_vero
+ggsave(pc_vero ,filename = file.path(paste0(out_path1,"/FigS13B_Seasonal_precovid_vero.pdf")),
+         width = 7.3,height=3.4,device   = cairo_pdf,  family   = "Arial") 
+
+ccm_virus_types1 <- c("IV drives HMPV", "IV drives ADV","IV drives RV", "IV drives PIV", "IV drives RSV",
+                         "IBV drives HMPV", "IBV drives ADV","IBV drives RV", "IBV drives PIV", "IBV drives RSV")
+plot_ccm_virus <- subset(plot_ccm_virus_vero, RVI_type %in% ccm_virus_types1)
+
+plot_ccm_virus$RVI_type <- factor(plot_ccm_virus$RVI_type, levels = ccm_virus_types1)
+
+custom_colors <- c("#4daf4a","#4daf4a","#4daf4a","#4daf4a", "#4daf4a",
+                   "#4daf4a","#4daf4a","#4daf4a","#4daf4a", "#4daf4a")
+
+dat_label <- tibble(xpos=c("IBV drives ADV","IBV drives HMPV","IBV drives PIV",
+                           "IBV drives RSV","IBV drives RV",
+                           "IV drives ADV","IV drives HMPV","IV drives PIV",
+                           "IV drives RSV","IV drives RV"), ypos= rep(-0.35, 10),
+                    lab =c(expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) < 0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001), expression(italic(p[meta]) <0.001),
+                           expression(italic(p[meta]) <0.001))) 
+
+plot_ccm_virus <- unique(plot_ccm_virus[, c("country", "RVI_type", "rho_actual", "method", 
+                                                        "RVI_type1", "fisher_t.p_sea", "fisher_t.p_ebi", "p_sign1")])
+pc_virus <- ggplot(data=plot_ccm_virus, aes(x=RVI_type, y=rho_actual,fill=RVI_type)) +
+  geom_boxplot(notch=F, outlier.shape = NA,outlier.size = 1,outlier.fill = "black",
+               color="black",width=0.53,alpha=0.6)+ 
+  geom_quasirandom(data=plot_ccm_virus,size=4,stroke = 1, width=0.25,  alpha=0.8,
+                   aes(x=RVI_type, y=rho_actual, shape=as.factor(p_sign1))) +
+  labs(title = "",x="",y=expression(paste("Cross mapping skill (",rho,")"))) + 
+  scale_y_continuous(limits = c(-0.6, 1),
+                     breaks = seq(-0.5, 1,0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black",size=1) +
+  scale_shape_manual(name = '',values = c(16, 1),label=c("p < 0.05","p > 0.05")) +
+  scale_fill_manual(name = '', values = custom_colors) + 
+  scale_color_manual(name = '', values = custom_colors) +  
+  mytheme+
+  geom_text(data = dat_label,
+            aes(x = xpos, y = ypos, label = lab), 
+            inherit.aes = FALSE, parse = TRUE, color = 'gray20', size = 6,
+            vjust = 0.5, hjust = 0.5, position = "nudge") +
+  coord_flip()+
+  guides(color = "none",fill = "none") +
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank())
+
+pc_virus
+
+ggsave(pc_virus ,filename = file.path(paste0(out_path1,"/FigS13D_Seasonal_precovid_virus.pdf")),
+         width = 7.4,height=10.5,device   = cairo_pdf,  family   = "Arial") 
+
+```
+
+
+
+

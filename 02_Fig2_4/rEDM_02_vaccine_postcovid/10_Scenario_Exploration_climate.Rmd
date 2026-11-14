@@ -1,0 +1,346 @@
+---
+title: "Step 6: Scenario Exploration"   
+output: html_document
+---
+
+## Prepare variable combinations for scenario exploration
+Include influenza activity, influenza vaccination coverage, temperature, and absolute humidity for scenario exploration.
+```{r chunk10_01_Scenario_exploration_virus_pairs}
+data_obs.null <- data_country_obs_null[, c("year_decimal",virus_name,"INF_A","INF_B","INF_ALL","Vaccine","Temp", "AH")]
+
+all_vars_other <- c(virus_name)
+all_vars_flu <- c("INF_A","INF_B","INF_ALL")
+var_pairs0 <- expand.grid(all_vars_other, all_vars_flu)
+var_pairs0$Var3 <- "Vaccine, Temp, AH"
+var_pairs0$mul_drivers <- paste0(var_pairs0[,1],", ",var_pairs0[,2],", ",var_pairs0[,3])
+colnames(var_pairs0) <- c("target","flu","vero","mul_drivers")
+print(var_pairs0$mul_drivers)
+rownames(var_pairs0) <- var_pairs0$mul_drivers
+all_vars4 <- unique(var_pairs0$mul_drivers)
+print(all_vars4)
+```
+
+### Prepare lagged variables for scenario exploration
+```{r chunk10_02_Scenario_exploration_prepare}
+# Load observed multiview EDM results
+out_path0 <- "02_output/02_CCM/03_mul_CCM/01_mul_CCM_country_result"
+text <- read.csv(paste(out_path0,"/", country_index, "_mul_ccm_obs_result_",
+                                 country_name,".csv", sep=""))
+data_obs.lag_best_com <- list()
+
+for(var_id in 1:length(all_vars4)){
+  var=all_vars4[var_id]
+# Extract selected embedding variables and lags
+selected_rows <- text[text$var_col == var&text$country == country_name, ]
+numbers_list <- list()
+for (col_name in colnames(selected_rows[grep("^name_", colnames(selected_rows))])) {
+  column_values <- selected_rows[[col_name]]
+  numbers <- as.integer(gsub("[^0-9]", "", column_values))
+  number_name <- sub("\\s*\\(.*", "", column_values[1])  
+  numbers_list[[number_name]] <- numbers
+  }
+best_lag <- unlist(numbers_list)
+best_lag_df <- data.frame(variable = names(best_lag), lag = best_lag)
+var_name <- strsplit(var, ", ")[[1]]
+
+# Construct lagged data for scenario exploration
+data_obs.lag_best <- lapply(var_name, function(col_name) {
+  shift(data_obs.null[[col_name]], n = best_lag[col_name], fill = NA)
+})
+
+lag_drivers <- c(paste0(var_name[1],"_lag1"),var_name[2:5])
+names(data_obs.lag_best) <- lag_drivers 
+
+data_obs.lag_best <- cbind(data_obs.null[,c("year_decimal",var_name[1])], data.frame(data_obs.lag_best))
+colnames(data_obs.lag_best)[colnames(data_obs.lag_best) == "data_obs.null[, var_name[1]]"] <- var_name[1]
+data_obs.lag_best$time_index <- 1:nrow(data_obs.lag_best)
+data_obs.lag_best <- data_obs.lag_best[, c("time_index",  names(data_obs.lag_best)[1:(ncol(data_obs.lag_best)-1)])]
+
+data_obs.lag_best$mul_drivers <- NULL
+data_obs.lag_best$mul_drivers <- paste0(var_name[1],("_lag1")," ", var_name[2]," ",var_name[3]," ",var_name[4], " ", var_name[5])
+data_obs.lag_best_com[[var]] <- data_obs.lag_best
+}
+```
+
+
+### Scenario Exploration: Influenza Activity
+```{r chunk10_03_Scenario_exploration_for_flu}
+se.flu_summary <- list()
+for(var_id in 1:length(all_vars4)){
+var=all_vars4[var_id]
+data_obs.lag_best <- data_obs.lag_best_com[[var]]
+mul_drivers <- unique(data_obs.lag_best$mul_drivers)
+
+split_drivers <- unlist(strsplit(mul_drivers, " "))
+vars_num <- length(unique(split_drivers))
+flu_var <- as.character(split_drivers[[2]])
+virus_var <- gsub("_lag1$", "", as.character(split_drivers[[1]]))
+
+lib_num <- c(1,NROW(data_country.norm))
+pred_num <- lib_num +NROW(data_country.norm)
+# Define the perturbation in influenza activity
+delta <- 2/ sd(data_country[[flu_var]],na.rm=TRUE)
+# Construct increased and decreased influenza activity scenarios
+data_obs.plus <- data_obs.lag_best
+data_obs.plus[[flu_var]] <- data_obs.plus[[flu_var]] +delta/2
+data_obs.plus <- bind_rows(data_obs.lag_best,data_obs.plus)%>%
+  select(-mul_drivers)
+
+data_obs.minus <- data_obs.lag_best
+data_obs.minus[[flu_var]] <-data_obs.minus[[flu_var]] - delta/2
+data_obs.minus <- bind_rows(data_obs.lag_best,data_obs.minus)%>%
+  select(-mul_drivers)
+
+se.flu <- data.frame()
+  Mview.plus <- block_lnlp(data_obs.plus, lib = lib_num, pred = pred_num, 
+                            norm = 2, method = c("simplex"), tp = 1, 
+                            num_neighbors = "e+1", columns =  mul_drivers, target_column = virus_var,
+                            stats_only = F, first_column_time =  TRUE, exclusion_radius = NULL, 
+                            epsilon = NULL, theta = NULL, silent = TRUE, save_smap_coefficients = FALSE)
+  Mview.minus <- block_lnlp(data_obs.minus, lib = lib_num, pred = pred_num, 
+                            norm = 2, method = c("simplex"), tp = 1, 
+                            num_neighbors = "e+1", columns =  mul_drivers, target_column = virus_var,
+                            stats_only = F, first_column_time =  TRUE, exclusion_radius = NULL, 
+                            epsilon = NULL, theta = NULL, silent = TRUE, save_smap_coefficients = FALSE)
+  Mul_prediction.plus <- Mview.plus[["model_output"]] %>%
+  rename(pred.plus = Predictions)
+  
+  Mul_prediction.minus <- Mview.minus[["model_output"]] %>%
+  rename(pred.minus = Predictions)
+  
+  results.flu <- full_join(Mul_prediction.plus,
+                       Mul_prediction.minus,
+                       by = c("time_index", "Observations")) %>%
+  mutate(delta =((pred.plus-pred.minus)/2) *sd(data_country[[virus_var]][-nrow(data_country)],na.rm=TRUE))
+  
+  year_decimal_data <- data_obs.lag_best %>%
+  select(time_index, year_decimal)
+  
+  results.flu <-   results.flu%>%
+  left_join(year_decimal_data, by = "time_index") 
+  
+  results.flu$country <- country_name
+  se.flu <- results.flu %>% select(time_index,year_decimal, Observations, pred.plus, pred.minus, delta, country)
+  se.flu$mul_type <- var
+  se.flu_summary[[var]] <- se.flu
+
+}
+
+se.flu_com <- bind_rows(se.flu_summary)
+
+out_path1 <- "02_output/02_CCM/03_mul_CCM/02_mul_smap_country_result"
+dir.create(out_path1)
+write.csv(se.flu_com,paste(out_path1,"/", country_index, "_mul_smap_flu_result_",
+                                 country_name,".csv", sep=""),row.names = F)
+```
+
+
+
+### Scenario Exploration: Influenza Vaccination Coverage
+```{r chunk10_04_Scenario_exploration_for_vaccine}
+se.vero_summary <- list()
+for(var_id in 1:length(all_vars4)){
+var=all_vars4[var_id]
+data_obs.lag_best <- data_obs.lag_best_com[[var]]
+mul_drivers <- unique(data_obs.lag_best$mul_drivers)
+
+split_drivers <- unlist(strsplit(mul_drivers, " "))
+vars_num <- length(unique(split_drivers))
+vero_var <- as.character(split_drivers[[3]])
+virus_var <- gsub("_lag1$", "", as.character(split_drivers[[1]]))
+
+lib_num <- c(1,NROW(data_country.norm))
+pred_num <- lib_num +NROW(data_country.norm)
+# Define the perturbation in influenza vaccination coverage
+delta <- 2/ sd(data_country[[vero_var]],na.rm=TRUE)
+# Construct increased and decreased vaccination coverage scenarios
+data_obs.plus <- data_obs.lag_best
+data_obs.plus[[vero_var]] <- data_obs.plus[[vero_var]] +delta/2
+data_obs.plus <- bind_rows(data_obs.lag_best,data_obs.plus)%>%
+  select(-mul_drivers)
+
+data_obs.minus <- data_obs.lag_best
+data_obs.minus[[vero_var]] <-data_obs.minus[[vero_var]] - delta/2
+data_obs.minus <- bind_rows(data_obs.lag_best,data_obs.minus)%>%
+  select(-mul_drivers)
+
+se.vero <- data.frame()
+  Mview.plus <- block_lnlp(data_obs.plus, lib = lib_num, pred = pred_num, 
+                            norm = 2, method = c("simplex"), tp = 1, 
+                            num_neighbors = "e+1", columns =  mul_drivers, target_column = virus_var,
+                            stats_only = F, first_column_time =  TRUE, exclusion_radius = NULL, 
+                            epsilon = NULL, theta = NULL, silent = TRUE, save_smap_coefficients = FALSE)
+  Mview.minus <- block_lnlp(data_obs.minus, lib = lib_num, pred = pred_num, 
+                            norm = 2, method = c("simplex"), tp = 1, 
+                            num_neighbors = "e+1", columns =  mul_drivers, target_column = virus_var,
+                            stats_only = F, first_column_time =  TRUE, exclusion_radius = NULL, 
+                            epsilon = NULL, theta = NULL, silent = TRUE, save_smap_coefficients = FALSE)
+  Mul_prediction.plus <- Mview.plus[["model_output"]] %>%
+  rename(pred.plus = Predictions)
+  
+  Mul_prediction.minus <- Mview.minus[["model_output"]] %>%
+  rename(pred.minus = Predictions)
+  
+  results.vero <- full_join(Mul_prediction.plus,
+                       Mul_prediction.minus,
+                       by = c("time_index", "Observations")) %>%
+  mutate(delta =((pred.plus-pred.minus)/2) *sd(data_country[[virus_var]][-nrow(data_country)],na.rm=TRUE))
+  year_decimal_data <- data_obs.lag_best %>%
+  select(time_index, year_decimal)
+  
+  results.vero <-   results.vero%>%
+  left_join(year_decimal_data, by = "time_index") 
+  results.vero$country <- country_name
+  se.vero <- results.vero %>% select(time_index,year_decimal, Observations, pred.plus, pred.minus, delta, country)
+  se.vero$mul_type <- var
+  se.vero_summary[[var]] <- se.vero
+
+}
+
+se.vero_com <- bind_rows(se.vero_summary)
+
+# Export country-specific scenario exploration results
+write.csv(se.vero_com,paste(out_path1,"/", country_index, "_mul_smap_vero_result_",
+                                 country_name,".csv", sep=""),row.names = F)
+```
+
+
+
+
+### Scenario Exploration: Temperature
+```{r chunk10_05_Scenario_exploration_for_Temp}
+se.temp_summary <- list()
+for(var_id in 1:length(all_vars4)){
+var=all_vars4[var_id]
+data_obs.lag_best <- data_obs.lag_best_com[[var]]
+mul_drivers <- unique(data_obs.lag_best$mul_drivers)
+
+split_drivers <- unlist(strsplit(mul_drivers, " "))
+vars_num <- length(unique(split_drivers))
+temp_var <- as.character(split_drivers[[4]])
+virus_var <- gsub("_lag1$", "", as.character(split_drivers[[1]]))
+
+lib_num <- c(1,NROW(data_country.norm))
+pred_num <- lib_num +NROW(data_country.norm)
+# Define the perturbation in temperature
+delta <- 2/ sd(data_country[[temp_var]],na.rm=TRUE)
+# Construct increased and decreased temperature scenarios
+data_obs.plus <- data_obs.lag_best
+data_obs.plus[[temp_var]] <- data_obs.plus[[temp_var]] +delta/2
+data_obs.plus <- bind_rows(data_obs.lag_best,data_obs.plus)%>%
+  select(-mul_drivers)
+
+data_obs.minus <- data_obs.lag_best
+data_obs.minus[[temp_var]] <-data_obs.minus[[temp_var]] - delta/2
+data_obs.minus <- bind_rows(data_obs.lag_best,data_obs.minus)%>%
+  select(-mul_drivers)
+
+se.temp <- data.frame()
+  Mview.plus <- block_lnlp(data_obs.plus, lib = lib_num, pred = pred_num, 
+                            norm = 2, method = c("simplex"), tp = 1, 
+                            num_neighbors = "e+1", columns =  mul_drivers, target_column = virus_var,
+                            stats_only = F, first_column_time =  TRUE, exclusion_radius = NULL, 
+                            epsilon = NULL, theta = NULL, silent = TRUE, save_smap_coefficients = FALSE)
+  Mview.minus <- block_lnlp(data_obs.minus, lib = lib_num, pred = pred_num, 
+                            norm = 2, method = c("simplex"), tp = 1, 
+                            num_neighbors = "e+1", columns =  mul_drivers, target_column = virus_var,
+                            stats_only = F, first_column_time =  TRUE, exclusion_radius = NULL, 
+                            epsilon = NULL, theta = NULL, silent = TRUE, save_smap_coefficients = FALSE)
+  Mul_prediction.plus <- Mview.plus[["model_output"]] %>%
+  rename(pred.plus = Predictions)
+  
+  Mul_prediction.minus <- Mview.minus[["model_output"]] %>%
+  rename(pred.minus = Predictions)
+  
+  results.temp <- full_join(Mul_prediction.plus,
+                       Mul_prediction.minus,
+                       by = c("time_index", "Observations")) %>%
+  mutate(delta =((pred.plus-pred.minus)/2) *sd(data_country[[virus_var]][-nrow(data_country)],na.rm=TRUE))
+  year_decimal_data <- data_obs.lag_best %>%
+  select(time_index, year_decimal)
+  
+  results.temp <-   results.temp%>%
+  left_join(year_decimal_data, by = "time_index") 
+  results.temp$country <- country_name
+  se.temp <- results.temp %>% select(time_index,year_decimal, Observations, pred.plus, pred.minus, delta, country)
+  se.temp$mul_type <- var
+  se.temp_summary[[var]] <- se.temp
+
+}
+
+se.temp_com <- bind_rows(se.temp_summary)
+
+# Export country-specific scenario exploration results
+write.csv(se.temp_com,paste(out_path1,"/", country_index, "_mul_smap_temp_result_",
+                                 country_name,".csv", sep=""),row.names = F)
+```
+
+
+
+Step2. Scenario exploration for AH
+```{r chunk10_06_Scenario_exploration_for_AH}
+se.ah_summary <- list()
+for(var_id in 1:length(all_vars4)){
+var=all_vars4[var_id]
+data_obs.lag_best <- data_obs.lag_best_com[[var]]
+mul_drivers <- unique(data_obs.lag_best$mul_drivers)
+split_drivers <- unlist(strsplit(mul_drivers, " "))
+vars_num <- length(unique(split_drivers))
+ah_var <- as.character(split_drivers[[4]])
+virus_var <- gsub("_lag1$", "", as.character(split_drivers[[1]]))
+
+lib_num <- c(1,NROW(data_country.norm))
+pred_num <- lib_num +NROW(data_country.norm)
+# Define the perturbation in absolute humidity
+delta <- 2/ sd(data_country[[ah_var]],na.rm=TRUE)
+# Construct increased and decreased absolute humidity scenarios
+data_obs.plus <- data_obs.lag_best
+data_obs.plus[[ah_var]] <- data_obs.plus[[ah_var]] +delta/2
+data_obs.plus <- bind_rows(data_obs.lag_best,data_obs.plus)%>%
+  select(-mul_drivers)
+
+data_obs.minus <- data_obs.lag_best
+data_obs.minus[[ah_var]] <-data_obs.minus[[ah_var]] - delta/2
+data_obs.minus <- bind_rows(data_obs.lag_best,data_obs.minus)%>%
+  select(-mul_drivers)
+
+se.ah <- data.frame()
+  Mview.plus <- block_lnlp(data_obs.plus, lib = lib_num, pred = pred_num, 
+                            norm = 2, method = c("simplex"), tp = 1, 
+                            num_neighbors = "e+1", columns =  mul_drivers, target_column = virus_var,
+                            stats_only = F, first_column_time =  TRUE, exclusion_radius = NULL, 
+                            epsilon = NULL, theta = NULL, silent = TRUE, save_smap_coefficients = FALSE)
+  Mview.minus <- block_lnlp(data_obs.minus, lib = lib_num, pred = pred_num, 
+                            norm = 2, method = c("simplex"), tp = 1, 
+                            num_neighbors = "e+1", columns =  mul_drivers, target_column = virus_var,
+                            stats_only = F, first_column_time =  TRUE, exclusion_radius = NULL, 
+                            epsilon = NULL, theta = NULL, silent = TRUE, save_smap_coefficients = FALSE)
+  Mul_prediction.plus <- Mview.plus[["model_output"]] %>%
+  rename(pred.plus = Predictions)
+  
+  Mul_prediction.minus <- Mview.minus[["model_output"]] %>%
+  rename(pred.minus = Predictions)
+  
+  results.ah <- full_join(Mul_prediction.plus,
+                       Mul_prediction.minus,
+                       by = c("time_index", "Observations")) %>%
+  mutate(delta =((pred.plus-pred.minus)/2) *sd(data_country[[virus_var]][-nrow(data_country)],na.rm=TRUE))
+  year_decimal_data <- data_obs.lag_best %>%
+  select(time_index, year_decimal)
+  
+  results.ah <-   results.ah%>%
+  left_join(year_decimal_data, by = "time_index") 
+  results.ah$country <- country_name
+  se.ah <- results.ah %>% select(time_index,year_decimal, Observations, pred.plus, pred.minus, delta, country)
+  se.ah$mul_type <- var
+  se.ah_summary[[var]] <- se.ah
+
+}
+
+se.ah_com <- bind_rows(se.ah_summary)
+
+# Export country-specific scenario exploration results
+write.csv(se.ah_com,paste(out_path1,"/", country_index, "_mul_smap_ah_result_",
+                                 country_name,".csv", sep=""),row.names = F)
+```
+

@@ -1,0 +1,348 @@
+---
+title: "Step 5: Multivariate EDM Forecast Improvement" 
+output: html_document
+---
+
+## Prepare variable combinations for multivariate EDM
+Include influenza activity, influenza vaccination coverage, temperature, and absolute humidity to assess improvements in forecasting non-influenza respiratory virus activity.
+```{r chunk09_01_mul_ccm_prepare}
+data_obs.null <-  data_country_obs_null
+seed_num <- 1117
+sur_num <- 100
+
+all_vars_other <- c(virus_name)
+all_vars_flu <- c("INF_A","INF_B","INF_ALL")
+var_pairs0 <- expand.grid(all_vars_other, all_vars_flu)
+var_pairs0$Var3 <- rep("Vaccine Temp AH", nrow(var_pairs0))
+var_pairs0$mul_drivers <- paste0(var_pairs0[,1]," ",var_pairs0[,2]," ",var_pairs0[,3])
+colnames(var_pairs0) <- c("target","flu","vero","mul_drivers")
+print(var_pairs0$mul_drivers)
+rownames(var_pairs0) <- var_pairs0$mul_drivers
+all_vars3 <- unique(var_pairs0$mul_drivers)
+print(all_vars3)
+```
+
+### Multiview Embedding
+Perform multiview EDM using the observed data.
+```{r chunk09_02_mul_ccm_actual_data}
+# Set multiview parameters
+vars_num <- 5 
+# library size
+lib_num <- c(1,NROW(data_country.norm))
+#lag
+E_num <- 4
+
+# Perform multiview EDM for each variable combination
+Mul_obs_summary <- foreach(var = all_vars3, .packages = needed_packages) %dopar% {
+Mul_obs_country <- data.frame()
+
+for (D_num in 1:(vars_num)) {
+  Mview <- Multiview(dataFrame = data_obs.null,
+                     lib = lib_num,
+                     pred = lib_num, 
+                     E = E_num,
+                     D = D_num, 
+                     multiview = ncol(combn(vars_num*E_num, D_num)),
+                     columns = as.character(var_pairs0[var,"mul_drivers"]), 
+                     target = as.character(var_pairs0[var,"target"]),
+                     trainLib = TRUE, 
+                     parameterList = TRUE,
+                     numThreads = used_cores,
+                     excludeTarget = FALSE, 
+                     showPlot = F) 
+
+  Mul_view <- Mview[["View"]] %>%
+  mutate(
+    var_col = pmap(select(., starts_with("name_")), ~ paste(gsub("\\(.*", "", c(...)), collapse = ", "))
+  ) %>%
+    filter_at(vars(starts_with("name_")), any_vars(grepl(paste0(var_pairs0[var,"target"],"\\(t-1\\)"), .))) %>%
+    filter_at(vars(starts_with("name_")), 
+            all_vars(!grepl(paste0(var_pairs0[var,"target"],"\\(t-0\\)|",
+                                   var_pairs0[var,"target"],"\\(t-2\\)|",
+                                   var_pairs0[var,"target"],"\\(t-3\\)"), .))) %>% 
+    arrange(across(starts_with("Col_")))
+  
+
+duplicates <- Mul_view %>%
+  select(starts_with("name_")) %>%
+  rowwise() %>%
+  mutate(same_prefix = any(duplicated(gsub("\\(.*", "", c_across(everything())))))
+
+  Mul_view$same_prefix <- duplicates$same_prefix
+
+ Mul_rho_max <- Mul_view %>%
+    filter(!same_prefix) %>%
+    select(-same_prefix) %>%
+    group_by(var_col) %>%
+    filter(rho == max(rho)) %>%
+    mutate(
+      var_col = as.character(var_col),
+      var_num = D_num,
+      country=country_name
+    )
+
+  Mul_obs_country <- rbind(Mul_obs_country, Mul_rho_max)
+}
+
+Mul_obs_country  <- Mul_obs_country %>% select(var_num, var_col, rho, MAE, RMSE, country, everything())
+Mul_obs_country$mul_drivers <- var
+
+  return(Mul_obs_country)
+}
+
+names(Mul_obs_summary) <- all_vars3
+mul_combined_obs <- bind_rows(Mul_obs_summary)
+mul_combined_obs <- as.data.frame(mul_combined_obs)
+mul_combined_obs$method <- "Observed"
+
+# Export country-specific multiview EDM results
+out_path0 <- "02_output/02_CCM/03_mul_CCM/01_mul_CCM_country_result"
+dir.create(out_path0)
+write.csv(mul_combined_obs,paste(out_path0,"/", country_index, "_mul_ccm_obs_result_",
+                                 country_name,".csv", sep=""),row.names = F)
+```
+
+
+### Multiview EDM with Ebisuzaki Surrogates
+```{r chunk09_03_mul_ccm_ebisuzaki_null_data}
+Mul_ebi_summary <- foreach(var = all_vars3, .packages = needed_packages) %dopar% {
+Mul_obs_country <- subset(mul_combined_obs, mul_drivers == var)
+Mul_ebi_all <- c()
+for (num in 1:sur_num) {
+
+  data_null.lag <- data_obs.null[, c("year_decimal", virus_name,
+                                     paste0("INF_A_ebi.", num),
+                                     paste0("INF_B_ebi.", num),
+                                     paste0("INF_ALL_ebi.", num),
+                                     paste0("Vaccine_ebi.", num),
+                                     paste0("Temp_ebi.", num),
+                                     paste0("AH_ebi.", num))]
+
+  for (i in 0:(E_num-1)) {
+    suffix <- ifelse(i == 0, "(t-0)", paste("(t-", i, ")", sep = ""))
+    data_null.lag[paste0(as.character(var_pairs0[var,"target"]), 
+                         suffix)] <- dplyr::lag(data_null.lag[,as.character(var_pairs0[var,"target"])], i, default = NA)
+    for (col in c("INF_A","INF_B","INF_ALL","Vaccine","Temp","AH")) {
+      for (j in num) {
+        col_name <- paste0(col, "_ebi.", j)
+        data_null.lag[paste0(col, suffix)] <- dplyr::lag(data_null.lag[col_name], i, default = NA)
+      }
+    }
+    }
+  
+  data_null.lag <- data_null.lag[, !grepl("_ebi", names(data_null.lag))]
+  
+  n_rows <- nrow(Mul_obs_country)
+  Mul_ebi <- c()
+  for (row_id in 1:n_rows) {
+    drive_col <- unlist(Mul_obs_country[row_id, grepl("name_", names(Mul_obs_country))])
+    drive_col <- drive_col[!is.na(drive_col)]
+    
+    pred <- block_lnlp(
+      data_null.lag, 
+      target_column = as.character(var_pairs0[var,"target"]), columns = drive_col,
+      first_column_time = TRUE, stats_only = FALSE)
+    
+    Mul_ebi_row <- pred[["stats"]]
+    Mul_ebi_row$sur_id <- num
+    Mul_ebi <- rbind(Mul_ebi, Mul_ebi_row)
+    Mul_ebi <- as.data.frame(Mul_ebi)
+
+  }
+  
+  Mul_ebi_all <- rbind(Mul_ebi_all, Mul_ebi)
+  Mul_ebi_all <- as.data.frame(Mul_ebi_all)
+}
+
+Mul_ebi_all$var_col <- gsub("\\([^)]+\\)", "", Mul_ebi_all$cols)
+
+Mul_ebi_all$var_col <- gsub("^\\s+|\\s+$", "", Mul_ebi_all$var_col)
+
+Mul_ebi_all$var_col <- gsub(" ", ", ", Mul_ebi_all$var_col)
+
+Mul_ebi_all <- Mul_ebi_all[, c("var_col", names(Mul_ebi_all)[1:ncol(Mul_ebi_all)-1])] %>%
+  mutate(country = country_name)
+Mul_ebi_all$mul_drivers <- var
+
+return(Mul_ebi_all)
+}
+
+names(Mul_ebi_summary) <- all_vars3
+
+mul_combined_ebi <- bind_rows(Mul_ebi_summary)
+mul_combined_ebi <- as.data.frame(mul_combined_ebi)
+
+mul_combined_ebi$method <- "Ebisuzaki"
+mul_combined_ebi <- lapply(mul_combined_ebi, function(x) {
+    if (is.list(x)) {
+        return(unlist(x))  
+    } else {
+        return(x)
+    }
+})
+mul_combined_ebi <- as.data.frame(mul_combined_ebi)
+write.csv(mul_combined_ebi,paste(out_path0,"/", country_index, "_mul_ccm_ebi_result_",
+                                 country_name,".csv", sep=""),row.names = F)
+```
+
+### Multiview EDM with Seasonal Surrogates
+```{r chunk09_04_mul_ccm_seasonal_null_data}
+Mul_sea_summary <- foreach(var = all_vars3, .packages = needed_packages) %dopar% {
+Mul_obs_country <- subset(mul_combined_obs, mul_drivers == var)
+Mul_sea_all <- c()
+for (num in 1:sur_num) {
+
+  data_null.lag <- data_obs.null[, c("year_decimal", virus_name,
+                                     paste0("INF_A_sea.", num),
+                                     paste0("INF_B_sea.", num),
+                                     paste0("INF_ALL_sea.", num),
+                                     paste0("Vaccine_sea.", num),
+                                     paste0("Temp_sea.", num),
+                                     paste0("AH_sea.", num))]
+
+  for (i in 0:(E_num-1)) {
+    suffix <- ifelse(i == 0, "(t-0)", paste("(t-", i, ")", sep = ""))
+    data_null.lag[paste0(as.character(var_pairs0[var,"target"]), 
+                         suffix)] <- dplyr::lag(data_null.lag[,as.character(var_pairs0[var,"target"])], i, default = NA)
+    for (col in c("INF_A","INF_B","INF_ALL","Vaccine","Temp","AH")) {
+      for (j in num) {
+        col_name <- paste0(col, "_sea.", j)
+        data_null.lag[paste0(col, suffix)] <- dplyr::lag(data_null.lag[col_name], i, default = NA)
+      }
+    }
+    }
+
+  data_null.lag <- data_null.lag[, !grepl("_sea", names(data_null.lag))]
+  
+  n_rows <- nrow(Mul_obs_country)
+  Mul_sea <- c()
+  for (row_id in 1:n_rows) {
+    drive_col <- unlist(Mul_obs_country[row_id, grepl("name_", names(Mul_obs_country))])
+    drive_col <- drive_col[!is.na(drive_col)]
+    
+    pred <- block_lnlp(
+      data_null.lag, 
+      target_column = as.character(var_pairs0[var,"target"]), columns = drive_col,
+      first_column_time = TRUE, stats_only = FALSE)
+    
+    Mul_sea_row <- pred[["stats"]]
+    Mul_sea_row$sur_id <- num
+    Mul_sea <- rbind(Mul_sea, Mul_sea_row)
+
+  }
+  
+  Mul_sea_all <- rbind(Mul_sea_all, Mul_sea)
+  Mul_sea_all <- as.data.frame(Mul_sea_all)
+
+}
+
+Mul_sea_all$var_col <- gsub("\\([^)]+\\)", "", Mul_sea_all$cols)
+
+Mul_sea_all$var_col <- gsub("^\\s+|\\s+$", "", Mul_sea_all$var_col)
+
+Mul_sea_all$var_col <- gsub(" ", ", ", Mul_sea_all$var_col)
+
+Mul_sea_all <- Mul_sea_all[, c("var_col", names(Mul_sea_all)[1:ncol(Mul_sea_all)-1])] %>%
+  mutate(country = country_name)
+Mul_sea_all$mul_drivers <- var
+
+  return(Mul_sea_all)
+}
+
+names(Mul_sea_summary) <- all_vars3
+
+mul_combined_sea <- bind_rows(Mul_sea_summary)
+mul_combined_sea$method <- "Seasonal"
+
+mul_combined_sea <- lapply(mul_combined_sea, function(x) {
+    if (is.list(x)) {
+        return(unlist(x)) 
+    } else {
+        return(x)
+    }
+})
+mul_combined_sea <- as.data.frame(mul_combined_sea)
+write.csv(mul_combined_sea,paste(out_path0,"/", country_index, "_mul_ccm_sea_result_",
+                                 country_name,".csv", sep=""),row.names = F)
+```
+
+
+### Multiview EDM with Random Surrogates
+```{r chunk09_05_mul_ccm_random_null_data}
+Mul_ran_summary <- foreach(var = all_vars3, .packages = needed_packages) %dopar% {
+Mul_obs_country <- subset(mul_combined_obs, mul_drivers == var)
+Mul_ran_all <- c()
+for (num in 1:sur_num) {
+
+  data_null.lag <- data_obs.null[, c("year_decimal", virus_name,
+                                     paste0("INF_A_ran.", num),
+                                     paste0("INF_B_ran.", num),
+                                     paste0("INF_ALL_ran.", num),
+                                     paste0("Vaccine_ran.", num),
+                                     paste0("Temp_ran.", num),
+                                     paste0("AH_ran.", num))]
+
+  for (i in 0:(E_num-1)) {
+    suffix <- ifelse(i == 0, "(t-0)", paste("(t-", i, ")", sep = ""))
+    data_null.lag[paste0(as.character(var_pairs0[var,"target"]), 
+                         suffix)] <- dplyr::lag(data_null.lag[,as.character(var_pairs0[var,"target"])], i, default = NA)
+    for (col in c("INF_A","INF_B","INF_ALL","Vaccine","Temp","AH")) {
+      for (j in num) {
+        col_name <- paste0(col, "_ran.", j)
+        data_null.lag[paste0(col, suffix)] <- dplyr::lag(data_null.lag[col_name], i, default = NA)
+      }
+    }
+    }
+
+  data_null.lag <- data_null.lag[, !grepl("_ran", names(data_null.lag))]
+  
+  n_rows <- nrow(Mul_obs_country)
+  Mul_ran <- c()
+  for (row_id in 1:n_rows) {
+    drive_col <- unlist(Mul_obs_country[row_id, grepl("name_", names(Mul_obs_country))])
+    drive_col <- drive_col[!is.na(drive_col)]
+    
+    pred <- block_lnlp(
+      data_null.lag, 
+      target_column = as.character(var_pairs0[var,"target"]), columns = drive_col,
+      first_column_time = TRUE, stats_only = FALSE)
+    
+    Mul_ran_row <- pred[["stats"]]
+    Mul_ran_row$sur_id <- num
+    Mul_ran <- rbind(Mul_ran, Mul_ran_row)
+
+  }
+  
+  Mul_ran_all <- rbind(Mul_ran_all, Mul_ran)
+}
+
+Mul_ran_all$var_col <- gsub("\\([^)]+\\)", "", Mul_ran_all$cols)
+
+Mul_ran_all$var_col <- gsub("^\\s+|\\s+$", "", Mul_ran_all$var_col)
+
+Mul_ran_all$var_col <- gsub(" ", ", ", Mul_ran_all$var_col)
+
+Mul_ran_all <- Mul_ran_all[, c("var_col", names(Mul_ran_all)[1:ncol(Mul_ran_all)-1])] %>%
+  mutate(country = country_name)
+Mul_ran_all$mul_drivers <- var
+
+  return(Mul_ran_all)
+}
+
+names(Mul_ran_summary) <- all_vars3
+
+mul_combined_ran <- bind_rows(Mul_ran_summary)
+
+mul_combined_ran$method <- "Random"
+
+mul_combined_ran <- lapply(mul_combined_ran, function(x) {
+    if (is.list(x)) {
+        return(unlist(x))  
+    } else {
+        return(x)
+    }
+})
+mul_combined_ran <- as.data.frame(mul_combined_ran)
+write.csv(mul_combined_ran,paste(out_path0,"/", country_index, "_mul_ccm_ran_result_",
+                                 country_name,".csv", sep=""),row.names = F)
+```

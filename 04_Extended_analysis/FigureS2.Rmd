@@ -1,0 +1,135 @@
+---
+title: "Indirect effect of influenza vaccination coverage on the circulation of respiratory viruses"
+subtitle: "Supplementary Figure 2"
+output: html_document
+---
+
+## Load packages and set plotting theme
+```{r}
+rm(list = ls())
+library(dplyr);library(tidyverse);library(tidyr);library(lubridate);library(ggpubr)
+library(anytime);library(reshape2);library(ggplot2);library(RColorBrewer);library(readxl)
+library(gridExtra);library(grid);library(purrr);library(entropy)
+source("../plot_theme.R")
+options(scipen = 999)
+
+out_path1 <- paste0("FigS2")
+dir.create(out_path1)
+
+position <- read.csv("../00_data/lat_lon.csv")
+colnames(position) <- c("country","lon","lat")
+position[which(position$country=="United Kingdom, England"),"country"] <- "UK, England"
+position[which(position$country=="United Kingdom, Scotland"),"country"] <- "UK, Scotland"
+position[which(position$country=="United Kingdom, Wales"),"country"] <- "UK, Wales"
+position[which(position$country=="United Kingdom, Northern Ireland"),"country"] <- "UK, Northern Ireland"
+```
+
+## Prepare and save time series of the relative proportion (RP) of respiratory virus detections
+```{r eval=FALSE}
+if (FALSE) {
+# Load and retain variables required for plotting
+cols <- c("country", "year", "year_decimal", "virus",
+          "AAP", "flu_AAP", "fluA_AAP", "fluB_AAP")
+
+dat_pre <- read.csv("../00_data/multi_vaccine_indirect_precovid19.csv")
+dat_post <- read.csv("../00_data/multi_vaccine_indirect_2020-2024.csv")
+
+dat_post <- dat_post[,-37]
+dat <- rbind(dat_pre,dat_post)
+dat[which(dat$country=="United Kingdom, England"),"country"] <- "UK, England"
+dat[which(dat$country=="United Kingdom, Scotland"),"country"] <- "UK, Scotland"
+dat[which(dat$country=="United Kingdom, Wales"),"country"] <- "UK, Wales"
+dat[which(dat$country=="United Kingdom, Northern Ireland"),"country"] <- "UK, Northern Ireland"
+dat  <-  dat %>%
+  filter((year >= 2016 & year <= 2024)) 
+
+dat <- dat[, cols]
+
+# Save time series of the relative proportion (RP) of respiratory virus detections
+saveRDS(dat,"../00_data/ts_RP_virus.rds",compress = "xz")
+}
+```
+
+# Load saved data 
+```{r}
+dat <- readRDS("../00_data/ts_RP_virus.rds")
+```
+
+# Prepare data
+```{r}
+dat_rsv = subset(dat ,dat$virus=="RSV")
+dat_inf <- dat_rsv
+dat_inf$AAP <- dat_inf$flu_AAP
+dat_inf$virus <- "IV"
+dat_infA <- dat_rsv
+dat_infA$AAP <- dat_infA$fluA_AAP
+dat_infA$virus <- "IAV"
+dat_infB <- dat_rsv
+dat_infB$AAP <- dat_infB$fluB_AAP
+dat_infB$virus <- "IBV"
+dat1 <- subset(dat ,!dat$virus=="RSV")
+dat2 <- rbind(dat1,dat_inf,dat_infA,dat_infB,dat_rsv)
+```
+
+# Plot
+```{r fig.width=30, fig.height=25, dpi=300}
+plot_aap_list <- list()
+virus_name<- c("IV","IAV","IBV","RSV","PIV","RV","ADV","HMPV")
+n = length(virus_name)
+for(j in c(1:n))
+{
+  print(virus_name[j])
+  D1 = subset(dat2 ,dat2$virus==virus_name[j])
+  
+  
+  D1 <- D1[order(D1$country, D1$year_decimal), ]
+  study_country <- unique(D1$country)
+  
+  D1$country <- factor(D1$country,
+                       levels = position$country[order(position$lat, decreasing = T)],ordered=TRUE)
+  #colors_used <- c(rep("white", 1), brewer.pal(6, 'BuPu')) 
+  colors_used <- c("white", brewer.pal(8, "BuPu")[3:8]) 
+  
+  max_AAP <- max(D1$AAP)
+  rounded_AAP <- round(max_AAP / 20) * 20
+  final_AAP <- pmax(rounded_AAP, max_AAP)
+
+  p1 <- ggplot(D1, aes(year_decimal,country)) +
+    geom_tile(aes(fill=AAP),color = "white",size=0.1) +
+    scale_fill_gradientn(colors=colors_used, na.value="grey70"
+                         ,limits = c(0,final_AAP),breaks=seq(0,100,20)) +
+    scale_y_discrete(expand = c(0, 0),limits = rev(levels(D1$country)) ) + 
+    scale_x_continuous(expand = c(0, 0),breaks=seq(2016,2025,2),limits =c(2015.9,2025)) +
+    
+    geom_vline(xintercept =2020.167, linetype = "dashed", color = "black",size=1.5) +
+    geom_vline(xintercept =2023, linetype = "dashed", color = "black",size=1.5) +
+    labs(title = virus_name[j] ,x="",y="") + 
+    #facet_wrap(~ year, scales = "free_x",nrow = 1) +
+    mytheme+
+    theme(axis.text.x = element_text( color="black",vjust = 0.5,hjust = 0.5, angle = 0),
+          strip.text = element_text( face = "bold"))+
+    theme(legend.key.size = unit(0.5,"cm"),legend.key.width = unit(2,"cm"),legend.key.height  = unit(0.35,"cm"))+
+    theme(plot.margin=unit(c(1,0.5,1,0),'lines'),
+          panel.background = element_rect(fill = "gray88"),
+          panel.grid.major.x=element_blank(),
+          panel.grid.major.y=element_blank())+  # 设置背景色为灰色)
+    guides(fill=guide_colorbar(paste0("RP of ", virus_name[j]," detections (%)"),title.position = "top",
+                               title.theme = element_text(size = 20, angle = 0,hjust = 0.5),
+                               label.theme= element_text(size = 20),
+                               title.vjust = 0.9)) 
+  p1 
+  
+  plot_aap_list[[j]] <- p1
+  
+}  
+
+p1 <- grid.arrange(grobs = plot_aap_list, ncol = 4)
+fpath1 <- paste0(out_path1,"/FigS2_RP_month.pdf")
+ggsave(p1,filename = file.path(fpath1),device   = cairo_pdf,  family   = "Arial",
+       width =30,height =25)
+```
+
+
+
+
+

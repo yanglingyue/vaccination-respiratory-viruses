@@ -1,0 +1,137 @@
+---
+title: "Step 1: Cross-Correlation Analyses"   
+output: html_document
+---
+
+## Cross-Correlation Analyses
+```{r chunk05_1}
+source("04_data_formatting.R")
+```
+
+### Data
+
+We load and process the data and create our main dataframe.
+```{r chunk05_2}
+dat_country0  <- data.clean("multi_vaccine_indirect_postcovid19",country_index)
+dat_country0 <-  dat_country0 %>%
+  filter((year >= 2023 & year <= 2024))     
+dat_country0 <- dat_country0[order(dat_country0$year_decimal), ]
+country_name <- unique(dat_country0$country)
+virus_name <- unique(dat_country0$virus)
+#virus_name <- factor(virus_name, levels = c("RSV", "PIV", "HMPV", "RV","ADV", "HCoV", "HBoV"))
+print(virus_name)
+dat_country0 <- dat_country0[,c("country","year","month","year_decimal","date",
+                                "virus","AAP","fluA_AAP", "fluB_AAP", "flu_AAP","strategy2_general_coverage",
+                                "temp2m","abshum")]
+colnames(dat_country0)[8:13] <- c("INF_A","INF_B","INF_ALL","Vaccine","Temp","AH")
+data_country <- pivot_wider(dat_country0, names_from = virus, values_from = AAP)
+data_country <- data_country[,c("country","year","month","year_decimal","date",
+                        "Vaccine","Temp","AH",
+                        "INF_A","INF_B","INF_ALL",virus_name)]
+
+```
+
+### Cross-Correlation
+```{r chunk05_function}
+plot.xcor <- function(x, y, mainTitle){
+
+xcorr_x_y <- ccf(x, y, lag.max = 12, na.action=na.pass,
+                            type = c("correlation", "covariance"),
+                            plot = TRUE, main = "", axes = FALSE, xlab = "", ylab = "")
+  box(col="black")
+  axis(1, col="black", col.ticks="black", col.axis="black", cex.axis=1, tck = 0.02)
+  mtext("Time lag (week)", side=1, line=2.2, col="black", cex=1)
+  
+  axis(2, col="black", col.ticks="black", col.axis="black", cex.axis=1, tck = 0.02)
+  mtext(expression(paste("Cross-correlation with incidence (",rho,")")), side=2, line=2, 
+        col="black", cex=0.8)
+  
+  # # Use logical conditions to filter values with lag greater than 0
+  #bio_lag <- xcorr_x_y$lag[which(xcorr_x_y$acf == max(xcorr_x_y$acf[xcorr_x_y$lag > 0]))]
+  #bio_lag <- xcorr_x_y$lag[which(xcorr_x_y$acf == max(xcorr_x_y$acf))]
+  bio_lag <- xcorr_x_y$lag[which(abs(xcorr_x_y$acf) == max(abs(xcorr_x_y$acf)))]
+  abline(v = bio_lag, col = '#e74c3c', lwd = 2, lty = 3)
+  title(mainTitle, cex.main=1.4)
+  
+ # Extract lag values and corresponding correlation coefficients
+  lag_acf_df <- data.frame(
+    Lag = xcorr_x_y$lag,
+    ACF = xcorr_x_y$acf)
+    
+   return(list(lag_acf_df = lag_acf_df, max_lag = bio_lag))
+}
+
+```
+
+
+
+```{r,chunk05_virus_pair, fig.width=15, fig.height=16, dpi=300}
+ccm_parameter_lag <- c()
+#data_country <- data_country[,c("country","year","month","year_decimal","ISOYM",
+#                                "virus","cases","INF_A","INF_B","INF_ALL")]
+
+# Define variables for pairwise analysis
+all_vars_other <- c(virus_name,"INF_A","INF_B","INF_ALL")
+all_vars_flu <- c("INF_A","INF_B","INF_ALL","Vaccine","Temp","AH")
+
+#var_pairs = combn(all_vars, 2) # Combinations of vars, 2 at a time
+#colnames(var_pairs) <- paste0(var_pairs[1,],":",var_pairs[2,])
+#all_vars1 <- unique(colnames(var_pairs)) 
+#print(all_vars1)
+
+# Generate pairwise variable combinations
+var_pairs <- expand.grid(all_vars_flu, all_vars_other)
+var_pairs$Var1 <- as.character(var_pairs$Var1)
+var_pairs$Var2 <- as.character(var_pairs$Var2)
+
+var_pairs <- var_pairs[var_pairs$Var1 != var_pairs$Var2, ]
+var_pairs <- t(var_pairs)
+colnames(var_pairs) <- paste0(var_pairs[1,],":",var_pairs[2,])
+all_vars1 <- unique(colnames(var_pairs)) 
+var_pairs <- var_pairs[, order(var_pairs[1,])]
+print(var_pairs)
+print(all_vars1)
+```
+
+
+
+```{r,chunk05_plot, fig.width=20, fig.height=15, dpi=300}
+ccf_cor_coef <- matrix(nrow=25, ncol=ncol(var_pairs))
+ccf_cor_coef <-as.data.frame(ccf_cor_coef) 
+#par(mfrow = c(3, 5), mar = c(3.5,3.5,1.7,1), mgp = c(2,0.5,0), oma = c(0,0,0,0))
+par(mfrow = c(6, 10), mar = c(3.5,3.5,1.7,1), mgp = c(2,0.5,0), oma = c(0,0,3,0))
+
+for (l in 1:ncol(var_pairs)){
+col_var1 <-  which(colnames(data_country) == var_pairs[1,l])
+col_var2 <-   which(colnames(data_country) == var_pairs[2,l]) 
+col_name <- colnames(var_pairs)[l]
+
+# Set Var2 as x and Var1 as y, consistent with the subsequent CCM analysis
+lag_var1_var2 <- plot.xcor(data_country[,col_var1], data_country[,col_var2], col_name)
+
+## save lag
+ccm_parameter_lag <-  cbind(ccm_parameter_lag,lag_var1_var2$max_lag)
+colnames(ccm_parameter_lag)[l] <- paste0("lag_",colnames(var_pairs)[l])
+
+# save correlation coefficient
+ccf_lag <- lag_var1_var2$lag_acf_df["Lag"]
+ccf_cor_coef[,l] <-  lag_var1_var2$lag_acf_df["ACF"]
+#colnames(ccf_cor_coef)[1] <- "Lag"
+colnames(ccf_cor_coef)[l] <- colnames(var_pairs)[l]
+}
+
+#plot
+mtext(country_name, outer = TRUE, cex = 1.5,line=1)
+output_name <- paste("02_output/01_parameter_selection/01_Cross-Correlation/", country_index, "_", country_name, sep="")
+file_name = paste(output_name, ".pdf", sep="")
+dev.copy(pdf, file=file_name, width = 20, height = 15)
+dev.off()
+
+#save result
+print(ccm_parameter_lag)
+ccf_cor_coef <- cbind(ccf_lag,ccf_cor_coef)
+ccf_cor_coef$country <- country_name
+print(ccf_cor_coef)
+write.csv(ccf_cor_coef,paste("02_output/01_parameter_selection/01_Cross-Correlation/", country_index, "_", country_name,".csv", sep=""),row.names = F)
+```
+

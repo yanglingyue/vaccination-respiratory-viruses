@@ -1,0 +1,78 @@
+---
+title: "Step 3: Surrogate time series"   
+output: html_document
+---
+
+Step1. Lag vars and Set parameters
+```{r chunk07_1}
+#all_vars <- c("RSV","INF_A","INF_B","PIV","ADV","HMPV","Vaccine")
+all_vars <- c(virus_name,"INF_A","INF_B","INF_ALL","Vaccine","Temp","AH")
+data_country_clean <-  data_country.norm[, c("year_decimal","date", all_vars)]
+```
+
+
+Step2. Generate surrogate data for permutation tests
+```{r chunk07_2}
+seed = 2311
+sur_num <- 100
+sam_num <- 100
+
+set.seed(seed)
+#Generates surrogate data by randomizing the phases of a Fourier transform, preserving the power spectra of the null surrogates
+data_country_ebi <- lapply(all_vars, function(var) {
+  SurrogateData(data_country_clean[[var]], method = "ebisuzaki", num_surr = sur_num, T_period =  12)
+})
+names(data_country_ebi) <- paste0(all_vars, "_ebi")
+
+set.seed(seed)
+#Generates surrogate data by  computing a mean seasonal trend of the specified period and shuffling the residuals
+data_country_sea<- lapply(all_vars, function(var) {
+  SurrogateData(data_country_clean[[var]], method = "seasonal", num_surr = sur_num, T_period = 12, alpha =0.1)
+  })
+names(data_country_sea) <- paste0(all_vars, "_sea")
+
+set.seed(seed)
+#Generates surrogate data by randomly permuting the values of the original time series
+data_country_ran<- lapply(all_vars, function(var) {
+  SurrogateData(data_country_clean[[var]], method = "random_shuffle", num_surr = sur_num, T_period =  12)
+  })
+names(data_country_ran) <- paste0(all_vars, "_ran")
+
+data_country_ebi <- as.data.frame(data_country_ebi)
+data_country_sea <- as.data.frame(data_country_sea)
+data_country_ran <- as.data.frame(data_country_ran)
+
+data_country_obs_null <- cbind(data_country_clean,data_country_ebi,data_country_sea,data_country_ran)
+data_country_obs_null <- data_country_obs_null %>%
+  select(-date)
+data_country_clean <- data_country_clean %>%
+  select(-date)
+```
+
+### Visualization of surrogate time series
+```{r chunk07_3,fig.width=24, fig.height=18, dpi=300}
+plots_list <- list()
+for (var in all_vars) {
+    plot_null_model <- ggplot(data_country_obs_null, aes(year_decimal, group=1)) +
+      geom_line(aes(x=year_decimal, y=.data[[paste0(var,"_ran.1")]], color="Random surrogate"), size=1) +
+      geom_line(aes(x=year_decimal, y=.data[[paste0(var,"_ebi.1")]], color="Ebisuzaki surrogate"), size=1) +
+      geom_line(aes(x=year_decimal, y=.data[[paste0(var,"_sea.1")]], color="Seasonal surrogate"), size=1) +
+      geom_line(aes(x=year_decimal, y=.data[[var]], color="Observed"), size=1) +
+      labs(x="Time (week)", y=paste0(var, " (standardised)"), color="",title = country_name) +
+      scale_colour_manual(values = c("Observed" = 'black', "Ebisuzaki surrogate" = "#377eb8", 
+                                     "Seasonal surrogate" = '#e74c3c',"Random surrogate"='#f1c40f' )) +
+      mytheme +
+      guides(colour = guide_legend(ncol = 2))+
+      theme(panel.border = element_rect(colour = "black", fill=NA, size=1),
+            legend.position = "bottom",panel.grid.major.x=element_blank(),
+            panel.grid.major.y=element_blank()) 
+  
+  plots_list[[which(var==all_vars)]] <- plot_null_model
+}
+
+grid_arrange <- grid.arrange(grobs = plots_list, ncol = 3, nrow = 5, align = "hv")
+grid_arrange
+output_name <- paste("02_output/02_CCM/01_Null_Model_Data/", country_index, "_", country_name, sep="")
+file_name = paste(output_name, "_surrogate.pdf", sep="")
+ggsave(file_name, grid_arrange, width = 24, height = 18)
+```

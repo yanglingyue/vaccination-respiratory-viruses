@@ -1,0 +1,717 @@
+---
+title: "Indirect effect of influenza vaccination coverage on the circulation of respiratory viruses"   
+subtitle: "Post-COVID-19 period (2023–2024): Fig.4, Supplementary Figs.S15"
+output: html_document
+---
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+source("01_load_package.R")
+source("02_plot_theme.R")
+out_path1 <- "02_output/Fig4_postcovid"
+dir.create(out_path1)
+```
+
+## Prepare data for vaccination scenario exploration analysis
+```{r}
+data_country_plot0 <- read.csv("01_data/multi_vaccine_indirect_postcovid19.csv")
+data_country_plot <- data_country_plot0[,c("country","year","month","year_decimal","ISOYM",
+                                "virus","AAP","fluA_AAP", "fluB_AAP", "flu_AAP","strategy2_general_coverage")]
+colnames(data_country_plot)[8:11] <- c("INF_A","INF_B","INF_ALL","Vaccine")
+
+dat_vero_avg<- read.csv(paste0("01_data","/seasonal_flu_coverage_average.csv"))
+colnames(dat_vero_avg)[4] <- "general_coverage"
+
+low_country <- unique(subset(dat_vero_avg, general_coverage < 10)$country)
+high_country  <- unique(subset(dat_vero_avg, general_coverage > 30)$country)
+```
+
+
+## Prepare vaccination scenario exploration results
+```{r eval=FALSE}
+if (FALSE) {
+folder_path <- "02_output/02_CCM/03_mul_CCM/02_mul_smap_country_result"
+csv_files <- list.files(path = folder_path, pattern =  "vero_.*\\.csv$", full.names = TRUE)
+data_list <- lapply(csv_files, read.csv)
+se_pred.vero <- do.call(rbind, data_list)
+se_pred.vero$virus <- sub(",.*", "", se_pred.vero$mul_type)  
+se_pred.vero$flu_type <-  sapply(strsplit(se_pred.vero$mul_type, ", "), function(x) x[2])
+
+# Save precomputed vaccination scenario exploration results
+saveRDS(se_pred.vero, "02_output/Vaccine_scenario_postCOVID.rds", compress = "xz")
+}
+```
+
+## Load precomputed vaccination scenario exploration results
+```{r}
+# Load saved results to avoid processing numerous country-level files
+se_pred.vero <- readRDS("02_output/Vaccine_scenario_postCOVID.rds")
+
+plot.SE.vero <- data_country_plot %>%
+  inner_join(se_pred.vero, by = c("year_decimal","country","virus")) %>%
+  mutate(delta = delta)
+
+colors <- c("#377eb8",'#7570b3', "#dc3637","#cc2b80","#77488c","#EA2027","#45aaf2","#504190","#2f9798","#88b5d6","#d4b9da")
+```
+
+## Figure 4B: Post-COVID-19 (IAV)
+**The display range is limited; the full range is shown in Supplementary Fig. S15A.**
+```{r fig.width=17, fig.height=3.6, dpi=300}
+plot.SE.vero_a <- subset(plot.SE.vero, flu_type == "INF_A")
+plot.SE.vero_a <- plot.SE.vero_a %>%
+  mutate(region_type = case_when(
+    country %in% high_country ~ "High coverage region",
+    country %in% low_country ~ "Low coverage region",
+    TRUE ~ "Medium coverage region"
+  ))
+
+plot.SE.vero_a_rsv <- subset(plot.SE.vero_a, virus == "RSV")
+plot.SE.vero_a_piv <- subset(plot.SE.vero_a, virus == "PIV")
+plot.SE.vero_a_hmpv <- subset(plot.SE.vero_a, virus == "HMPV")
+plot.SE.vero_a_rv <- subset(plot.SE.vero_a, virus == "RV")
+plot.SE.vero_a_adv <- subset(plot.SE.vero_a, virus == "ADV")
+
+p_vero_rsv <-plot.SE.vero_a_rsv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  coord_cartesian(ylim =c(-1.5,1.5))+
+  scale_y_continuous(name = "Effect of AIVC on RSV\n(\u0394RSV/\u0394AIVC)",
+                     breaks = seq(-1.5, 1.5, 0.75),labels = scales::number_format(accuracy = 0.01)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+ theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_rsv
+
+p_vero_piv <-plot.SE.vero_a_piv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color ="black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +#
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  coord_cartesian(ylim =c(-0.5,0.5))+
+  scale_y_continuous(name = "Effect of AIVC on PIV\n(\u0394PIV/\u0394AIVC)",
+                  breaks = seq(-0.5, 0.5, 0.25),labels = scales::number_format(accuracy = 0.01)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+ theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_piv
+
+p_vero_rv <-plot.SE.vero_a_rv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color ="black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color = "black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +# 添加虚线
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  coord_cartesian(ylim =c(-0.5,0.5))+
+  scale_y_continuous(name = "Effect of AIVC on RV\n(\u0394RV/\u0394AIVC)",
+                    breaks = seq(-0.5, 0.5, 0.25),labels = scales::number_format(accuracy = 0.01)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_rv
+
+p_vero_hmpv <-plot.SE.vero_a_hmpv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  coord_cartesian(ylim =c(-1,1))+
+  scale_y_continuous(name = "Effect of AIVC on HMPV\n(\u0394HMPV/\u0394AIVC)",
+                    breaks = seq(-1,1, 0.5),labels = scales::number_format(accuracy = 0.01)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_hmpv
+
+
+p_vero_adv <-plot.SE.vero_a_adv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color ="gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  coord_cartesian(ylim = c(-0.3, 0.3))+
+  scale_y_continuous(name = "Effect of AIVC on ADV\n(\u0394HMPV/\u0394AIVC)",
+                     breaks = seq(-0.3,0.3, 0.15),labels = scales::number_format(accuracy = 0.01)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_adv
+
+p<-ggarrange(p_vero_rsv, p_vero_piv,p_vero_rv,p_vero_adv,p_vero_hmpv,
+             ncol =5, nrow = 1,widths = c(1,1),heights = c(1,1),
+             labels = c("",""),  vjust=1,align = "hv",
+             common.legend = TRUE, legend = "bottom",
+             font.label = list(size = 30, face = "bold"))
+p
+
+ggsave(p ,filename = file.path(paste0(out_path1,"/01_","Fig4B_IAV_post.pdf")),
+         width = 21.5,height=4.5,device   = cairo_pdf,  family   = "Arial")
+```
+
+
+## Supplementary Fig. S15A: Post-COVID-19 (IAV)
+**Full display range of Figure 4B**
+```{r fig.width=17, fig.height=3.6, dpi=300}
+plot.SE.vero_a <- subset(plot.SE.vero, flu_type == "INF_A")
+plot.SE.vero_a <- plot.SE.vero_a %>%
+  mutate(region_type = case_when(
+    country %in% high_country ~ "High coverage region",
+    country %in% low_country ~ "Low coverage region",
+    TRUE ~ "Medium coverage region"
+  ))
+
+plot.SE.vero_a_rsv <- subset(plot.SE.vero_a, virus == "RSV")
+plot.SE.vero_a_piv <- subset(plot.SE.vero_a, virus == "PIV")
+plot.SE.vero_a_hmpv <- subset(plot.SE.vero_a, virus == "HMPV")
+plot.SE.vero_a_rv <- subset(plot.SE.vero_a, virus == "RV")
+plot.SE.vero_a_adv <- subset(plot.SE.vero_a, virus == "ADV")
+
+p_vero_rsv <-plot.SE.vero_a_rsv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on RSV\n(\u0394RSV/\u0394AIVC)",
+                     limits = c(-3,1.71),breaks = seq(-3, 1.5, 1.5),labels = scales::number_format(accuracy = 0.1)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+ theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_rsv
+
+
+p_vero_piv <-plot.SE.vero_a_piv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color ="black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on PIV\n(\u0394PIV/\u0394AIVC)",
+                  limits = c(-0.5,0.86), breaks = seq(-0.4, 0.8, 0.4),labels = scales::number_format(accuracy = 0.1)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+ theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_piv
+
+p_vero_rv <-plot.SE.vero_a_rv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color ="black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color = "black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on RV\n(\u0394RV/\u0394AIVC)",
+                    limits = c(-0.5,1.5),breaks = seq(-0.5, 1.5, 0.5),labels = scales::number_format(accuracy = 0.1)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_rv
+
+p_vero_hmpv <-plot.SE.vero_a_hmpv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on HMPV\n(\u0394HMPV/\u0394AIVC)",
+                    limits = c(-1.81,1.02),breaks = seq(-1.8,0.9, 0.9),labels = scales::number_format(accuracy = 0.1)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_hmpv
+
+
+
+p_vero_adv <-plot.SE.vero_a_adv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  #geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 0.5) +
+  geom_vline(xintercept = 30, linetype = "dashed", color ="gray60",size=1.5) +# 添加虚线
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on ADV\n(\u0394HMPV/\u0394AIVC)",
+                     limits = c(-0.25,0.6),breaks = seq(-0.2,0.6, 0.2),labels = scales::number_format(accuracy = 0.1)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_adv
+
+p<-ggarrange(p_vero_rsv, p_vero_piv,p_vero_rv,p_vero_adv,p_vero_hmpv,
+             ncol =5, nrow = 1,widths = c(1,1),heights = c(1,1),
+             labels = c("",""),  vjust=1,align = "hv",
+             common.legend = TRUE, legend = "bottom",
+             font.label = list(size = 30, face = "bold"))
+p
+
+ggsave(p ,filename = file.path(paste0(out_path1,"/01_","FigS15A_IAV_post.pdf")),
+         width = 21,height=4.5,device   = cairo_pdf,  family   = "Arial")
+```
+
+
+## Compare vaccination scenario results between low- and high-coverage countries (IAV)
+```{r }
+plot.SE.vero_a <- subset(plot.SE.vero, flu_type == "INF_A")
+plot.SE.vero_a <- plot.SE.vero_a %>%
+  mutate(region_type = case_when(
+    country %in% high_country ~ "High coverage region",
+    country %in% low_country ~ "Low coverage region",
+    TRUE ~ "Medium coverage region"
+  ))
+
+plot.SE.vero_a1 <- plot.SE.vero_a[-which(plot.SE.vero_a$region_type=="Medium coverage region"),]
+
+plot.SE.vero_a1$region_type <- factor(plot.SE.vero_a1$region_type, 
+                                        levels =c("High coverage region","Low coverage region"))
+# Welch's t-test
+plot.SE.vero_a1 %>%
+  group_by(virus) %>%  # Virus 是病毒类型列名，改成你自己的
+  summarise(
+    t_test_result = list(t.test(delta ~ region_type, data = cur_data()))
+  ) %>%
+  mutate(tidy_result = lapply(t_test_result, broom::tidy)) %>%  # 整理结果
+  unnest(tidy_result)
+
+# Levene's test
+library(car)
+plot.SE.vero_a1 %>%
+  group_by(virus) %>%
+  summarise(
+    levene_result = list(leveneTest(delta ~ region_type, data = cur_data()))
+  ) %>%
+  mutate(
+    tidy_result = lapply(levene_result, function(x) broom::tidy(x)[1, ])  # 取主检验那一行
+  ) %>%
+  unnest(tidy_result)
+```
+
+## Supplementary Fig. S15B: Post-COVID-19 (IV)
+```{r fig.width=17, fig.height=3.6, dpi=300}
+plot.SE.vero_IV <- subset(plot.SE.vero, flu_type == "INF_ALL")
+plot.SE.vero_IV <- plot.SE.vero_IV %>%
+  mutate(region_type = case_when(
+    country %in% high_country ~ "High coverage region",
+    country %in% low_country ~ "Low coverage region",
+    TRUE ~ "Medium coverage region"
+  ))
+
+plot.SE.vero_IV_rsv <- subset(plot.SE.vero_IV, virus == "RSV")
+plot.SE.vero_IV_piv <- subset(plot.SE.vero_IV, virus == "PIV")
+plot.SE.vero_IV_hmpv <- subset(plot.SE.vero_IV, virus == "HMPV")
+plot.SE.vero_IV_rv <- subset(plot.SE.vero_IV, virus == "RV")
+plot.SE.vero_IV_adv <- subset(plot.SE.vero_IV, virus == "ADV")
+
+p_vero_rsv_IV <-plot.SE.vero_IV_rsv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on RSV\n(\u0394RSV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-3.6,1.86),breaks = seq(-3.6, 1.8, 1.8)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+ theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+
+p_vero_piv_IV <-plot.SE.vero_IV_piv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color ="black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on PIV\n(\u0394PIV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-0.4,0.8), breaks = seq(-0.4, 0.8, 0.4)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+ theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_piv
+
+p_vero_rv_IV <-plot.SE.vero_IV_rv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color ="black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color = "black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +# 添加虚线
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on RV\n(\u0394RV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-0.62,1.41), breaks = seq(-0.6, 1.2, 0.6)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_rv
+
+p_vero_hmpv_IV <-plot.SE.vero_IV_hmpv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +# 添加虚线
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on HMPV\n(\u0394HMPV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-1.5,1), breaks = seq(-1.5, 0.5, 1)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_hmpv
+
+
+p_vero_adv_IV <-plot.SE.vero_IV_adv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color ="gray60",size=1.5) +# 添加虚线
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on ADV\n(\u0394HMPV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-0.3,0.6), breaks = seq(-0.3, 0.6, 0.3)) +
+  scale_x_continuous(name = "AIVC",breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_adv
+
+p<-ggarrange(p_vero_rsv_IV, p_vero_piv_IV,p_vero_rv_IV,p_vero_adv_IV,p_vero_hmpv_IV,
+             ncol =5, nrow = 1,widths = c(1,1),heights = c(1,1),
+             labels = c("",""),  vjust=1,align = "hv",
+             common.legend = TRUE, legend = "bottom",
+             font.label = list(size = 30, face = "bold"))
+p
+
+ggsave(p ,filename = file.path(paste0(out_path1,"/01_","FigS15B_IV_post.pdf")),
+         width = 21,height=4.5,device   = cairo_pdf,  family   = "Arial")
+```
+
+
+## Supplementary Fig. S15C: Pre-COVID-19 (IBV)
+```{r fig.width=17, fig.height=3.6, dpi=300}
+plot.SE.vero_IBV <- subset(plot.SE.vero, flu_type == "INF_B")
+plot.SE.vero_IBV <- plot.SE.vero_IBV %>%
+  mutate(region_type = case_when(
+    country %in% high_country ~ "High coverage region",
+    country %in% low_country ~ "Low coverage region",
+    TRUE ~ "Medium coverage region"
+  ))
+
+plot.SE.vero_IBV_rsv <- subset(plot.SE.vero_IBV, virus == "RSV")
+plot.SE.vero_IBV_piv <- subset(plot.SE.vero_IBV, virus == "PIV")
+plot.SE.vero_IBV_hmpv <- subset(plot.SE.vero_IBV, virus == "HMPV")
+plot.SE.vero_IBV_rv <- subset(plot.SE.vero_IBV, virus == "RV")
+plot.SE.vero_IBV_adv <- subset(plot.SE.vero_IBV, virus == "ADV")
+
+p_vero_rsv_IBV <- plot.SE.vero_IBV_rsv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on RSV\n(\u0394RSV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-4.6,1.62),breaks = seq(-4.5, 1.5, 1.5)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+ theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+
+p_vero_piv_IBV <-plot.SE.vero_IBV_piv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color ="black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on PIV\n(\u0394PIV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-0.3,0.9), breaks = seq(-0.3, 0.9, 0.3)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+ theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_piv
+
+p_vero_rv_IBV <-plot.SE.vero_IBV_rv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color ="black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color = "black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on RV\n(\u0394RV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-0.44,1.6), breaks = seq(-0.4, 1.6, 0.4)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_rv
+
+p_vero_hmpv_IBV <-plot.SE.vero_IBV_hmpv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color = "gray60",size=1.5) +# 添加虚线
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on HMPV\n(\u0394HMPV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-0.92,0.92), breaks = seq(-0.8, 0.8, 0.4)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_hmpv
+
+
+p_vero_adv_IBV <-plot.SE.vero_IBV_adv %>%
+  ggplot(aes(x = Vaccine, y = delta)) +
+  geom_abline(slope = 0, intercept = 0, color = 'black', lwd = 1) +
+  geom_point(aes(color =region_type,fill =region_type),shape = 21, size=3.5, alpha = 1,color="gray",na.rm = T) +
+  geom_quantile(quantiles = 0.05, size = 1, linetype = "dashed", color = "black", na.rm = TRUE) +
+  geom_quantile(quantiles = 0.95, size = 1, linetype = "dashed", color ="black", na.rm = TRUE)+
+  geom_vline(xintercept = 30, linetype = "dashed", color ="gray60",size=1.5) +
+  facet_wrap(~virus, scales = "free_x", nrow = 2) + 
+  scale_y_continuous(name = "Effect of AIVC on ADV\n(\u0394HMPV/\u0394AIVC)",labels = scales::number_format(accuracy = 0.1),
+                     limits = c(-0.3,0.6), breaks = seq(-0.2, 0.6, 0.2)) +
+  scale_x_continuous(name = "AIVC", breaks = seq(0,80, 20)) +
+  labs(y = NULL,color = "", fill = "",title = "") +
+  mytheme +
+  theme(axis.title.y.left = element_text(margin = margin(0,-0.1,0,0,'cm')),
+        axis.title.x = element_text(margin = margin(0.1,0,0,0,'cm')))+
+  scale_color_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+   scale_fill_manual("",values =  colors,breaks = c("Low coverage region",
+                                                   "Medium coverage region",
+                                                   "High coverage region"))+
+  theme(strip.text = element_text(size = 20),legend.position = "bottom",panel.grid.major.x=element_blank(),
+        panel.grid.major.y=element_blank(), strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+#p_vero_adv
+
+p<-ggarrange(p_vero_rsv_IBV, p_vero_piv_IBV,p_vero_rv_IBV,p_vero_adv_IBV,p_vero_hmpv_IBV,
+             ncol =5, nrow = 1,widths = c(1,1),heights = c(1,1),
+             labels = c("",""),  vjust=1,align = "hv",
+             common.legend = TRUE, legend = "bottom",
+             font.label = list(size = 30, face = "bold"))
+p
+
+ggsave(p ,filename = file.path(paste0(out_path1,"/01_","FigS15C_IBV_post.pdf")),
+         width = 21,height=4.5,device   = cairo_pdf,  family   = "Arial")
+```
+
+
+

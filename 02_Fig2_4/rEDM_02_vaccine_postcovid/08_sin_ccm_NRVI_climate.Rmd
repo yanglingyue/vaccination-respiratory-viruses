@@ -1,0 +1,428 @@
+---
+title: "Step 4: Convergent Cross-Mapping"   
+output: html_document
+---
+
+##Prepare
+```{r chunk08_1}
+max_row <- floor(NROW(data_country_clean) / 10) * 10
+lib_ccm <- c(5,max_row,5)
+seed_num <- 3121
+sur_num <- 100
+sam_num <- 100
+
+# Generate pairwise variable combinations for CCM
+all_vars_other <- c(virus_name,"INF_A","INF_B","INF_ALL")
+all_vars_flu <- c("INF_A","INF_B","INF_ALL","Vaccine","Temp","AH")
+
+var_pairs1 <- expand.grid(all_vars_other, all_vars_flu)
+var_pairs1 <- var_pairs1[-which(var_pairs1$Var1 == "INF_A" & var_pairs1$Var2 == "INF_B"), ]
+var_pairs1 <- var_pairs1[-which(var_pairs1$Var1 == "INF_B" & var_pairs1$Var2 == "INF_A"), ]
+var_pairs1 <- var_pairs1[-which(var_pairs1$Var1 == "INF_A" & var_pairs1$Var2 == "INF_ALL"), ]
+var_pairs1 <- var_pairs1[-which(var_pairs1$Var1 == "INF_ALL" & var_pairs1$Var2 == "INF_A"), ]
+var_pairs1 <- var_pairs1[-which(var_pairs1$Var1 == "INF_B" & var_pairs1$Var2 == "INF_ALL"), ]
+var_pairs1 <- var_pairs1[-which(var_pairs1$Var1 == "INF_ALL" & var_pairs1$Var2 == "INF_B"), ]
+
+var_pairs2 <- expand.grid(all_vars_flu, all_vars_other)
+var_pairs <- rbind(var_pairs1,var_pairs2)
+var_pairs <- var_pairs[var_pairs$Var1 != var_pairs$Var2, ]
+var_pairs <- t(var_pairs)
+colnames(var_pairs) <- paste0(var_pairs[1,],":",var_pairs[2,])
+all_vars1 <- unique(colnames(var_pairs)) 
+var_pairs <- var_pairs[, order(var_pairs[1,])]
+print(var_pairs)
+print(all_vars1)
+```
+
+## Convergent Cross-Mapping
+Run CCM between cases and each driver. 
+CCM using the actual data.
+```{r chunk08_02_CCM}
+# CCM
+ccm_obs_summary <- foreach(var = all_vars1, .packages = needed_packages) %dopar% {
+
+  ccm_result <- CCM(dataFrame = data_country_clean, 
+                    E = ccm_parameter[, paste0("E_", var_pairs[1,var])], 
+                    #tau=1,
+                    Tp=-1,
+		    columns = var_pairs[1,var],
+                    target = var_pairs[2,var], 
+                    seed = seed_num,
+                    libSizes = lib_ccm, 
+                    sample = sam_num,
+                    includeData = TRUE,
+                    showPlot = F)
+  
+  # Calculate mean, median, and quantiles of rho
+  quantiles <- ccm_result[["CCM1_PredictStat"]] %>%
+  group_by(LibSize) %>%
+  summarise(
+    rho_mean = mean(rho),
+    rho_Q50 = quantile(rho, 0.5),
+    rho_Q2.5 = quantile(rho, 0.025),
+    rho_Q97.5 = quantile(rho, 0.975)
+  ) %>%
+    select(-"LibSize")
+  
+  quantiles_rev <- ccm_result[["CCM2_PredictStat"]] %>%
+  group_by(LibSize) %>%
+  summarise(
+    rho_rev_mean = mean(rho),
+    rho_rev_Q50 = quantile(rho, 0.5),
+    rho_rev_Q2.5 = quantile(rho, 0.025),
+    rho_rev_Q97.5 = quantile(rho, 0.975)
+  )  %>%
+    select(-"LibSize")
+    
+  colnames(ccm_result[["LibMeans"]])[2] <- "rho"
+  colnames(ccm_result[["LibMeans"]])[3] <- "rho_rev"
+  
+  merged_data <- cbind(ccm_result[["LibMeans"]], quantiles, quantiles_rev)
+  return(merged_data)
+}
+
+names(ccm_obs_summary) <- all_vars1
+```
+
+
+#CCM using the ebisuzaki null data.
+```{r chunk08 CCM_03_CCM_ebisuzaki}
+# CCM using the ebisuzaki null data
+ccm_ebi_summary <- foreach(var = all_vars1, .packages = needed_packages) %dopar% {
+  ccm_result_list <- foreach(num = 1:sur_num) %dopar% {
+    result <- CCM(dataFrame = data_country_obs_null, 
+                  E = ccm_parameter[, paste0("E_", var_pairs[1,var])], 
+                  columns = var_pairs[1,var],
+                  target =  paste0(var_pairs[2,var], "_ebi.", num),
+                  #tau=1,
+                  Tp=-1,
+		  seed = seed_num,
+                  libSizes = lib_ccm, 
+                  sample = sam_num)
+
+    colnames(result)[2] <- "rho"
+    colnames(result)[3] <- "rho_rev"
+    result$sur_id <- num
+
+    return(result)
+  }
+  
+  ccm_result_combined <- do.call(bind_rows, ccm_result_list)  
+  # Calculate mean, median, and quantiles of rho
+  quantiles <- ccm_result_combined %>%
+  group_by(LibSize) %>%
+  summarise(
+    rho_mean = mean(rho),
+    rho_Q50 = quantile(rho, 0.5),
+    rho_Q2.5 = quantile(rho, 0.025),
+    rho_Q97.5 = quantile(rho, 0.975)
+  )
+  
+  quantiles_rev <- ccm_result_combined %>%
+  group_by(LibSize) %>%
+  summarise(
+    rho_rev_mean = mean(rho_rev),
+    rho_rev_Q50 = quantile(rho_rev, 0.5),
+    rho_rev_Q2.5 = quantile(rho_rev, 0.025),
+    rho_rev_Q97.5 = quantile(rho_rev, 0.975)
+  ) %>%
+    select(-"LibSize")
+    
+  merged_data <- cbind(quantiles, quantiles_rev) 
+
+  return(list(ccm_ebi_all = ccm_result_combined, ccm_ebi_95ci = merged_data))
+}
+
+names(ccm_ebi_summary) <- all_vars1
+
+```
+
+#CCM using the seasonal null data.
+```{r chunk08_04_CCM_seasonal}
+# CCM using the seasonal null data
+ccm_sea_summary <- foreach(var = all_vars1, .packages = needed_packages) %dopar% {
+  ccm_result_list <- foreach(num = 1:sur_num) %dopar% {
+    result <- CCM(dataFrame = data_country_obs_null, 
+                  E = ccm_parameter[, paste0("E_", var_pairs[1,var])], 
+                  columns =  var_pairs[1,var], 
+                  target = paste0(var_pairs[2,var], "_sea.", num),
+                  #tau=1,
+                  Tp=-1,
+		  seed = seed_num,
+                  libSizes = lib_ccm, 
+                  sample = sam_num)
+
+    colnames(result)[2] <- "rho"
+    colnames(result)[3] <- "rho_rev"
+    result$sur_id <- num
+    return(result)
+  }
+  
+  ccm_result_combined <- do.call(bind_rows, ccm_result_list)  
+
+  # Calculate mean, median, and quantiles of rho
+  quantiles <- ccm_result_combined %>%
+  group_by(LibSize) %>%
+  summarise(
+    rho_mean = mean(rho),
+    rho_Q50 = quantile(rho, 0.5),
+    rho_Q2.5 = quantile(rho, 0.025),
+    rho_Q97.5 = quantile(rho, 0.975)
+  )
+  
+  quantiles_rev <- ccm_result_combined %>%
+  group_by(LibSize) %>%
+  summarise(
+    rho_rev_mean = mean(rho_rev),
+    rho_rev_Q50 = quantile(rho_rev, 0.5),
+    rho_rev_Q2.5 = quantile(rho_rev, 0.025),
+    rho_rev_Q97.5 = quantile(rho_rev, 0.975)
+  ) %>%
+    select(-"LibSize")
+    
+  merged_data <- cbind(quantiles, quantiles_rev) 
+
+  return(list(ccm_sea_all = ccm_result_combined, ccm_sea_95ci = merged_data))
+}
+
+names(ccm_sea_summary) <- all_vars1
+#save.image(file=paste0("02_output/00_cache/",country_index,"_CCM-single_",country_name, ".RData") )
+```
+
+
+
+#CCM using the random null data.
+```{r chunk08_05_CCM_random}
+# CCM using the random null data
+ccm_ran_summary <- foreach(var = all_vars1, .packages = needed_packages) %dopar% {
+  ccm_result_list <- foreach(num = 1:sur_num) %dopar% {
+    result <- CCM(dataFrame = data_country_obs_null, 
+                  E = ccm_parameter[, paste0("E_", var_pairs[1,var])], 
+                  columns =  var_pairs[1,var], 
+                  target = paste0(var_pairs[2,var], "_ran.", num),
+                  #tau=1,
+                  Tp=-1,
+		  seed = seed_num,
+                  libSizes = lib_ccm, 
+                  sample = sam_num)
+
+    colnames(result)[2] <- "rho"
+    colnames(result)[3] <- "rho_rev"
+    result$sur_id <- num
+    return(result)
+  }
+  
+  ccm_result_combined <- do.call(bind_rows, ccm_result_list)  
+
+  # Calculate median, maximum, and quantiles of rho
+  quantiles <- ccm_result_combined %>%
+  group_by(LibSize) %>%
+  summarise(
+    rho_mean = mean(rho),
+    rho_Q50 = quantile(rho, 0.5),
+    rho_Q2.5 = quantile(rho, 0.025),
+    rho_Q97.5 = quantile(rho, 0.975)
+  )
+  
+  quantiles_rev <- ccm_result_combined %>%
+  group_by(LibSize) %>%
+  summarise(
+    rho_rev_mean = mean(rho_rev),
+    rho_rev_Q50 = quantile(rho_rev, 0.5),
+    rho_rev_Q2.5 = quantile(rho_rev, 0.025),
+    rho_rev_Q97.5 = quantile(rho_rev, 0.975)
+  ) %>%
+    select(-"LibSize")
+    
+  merged_data <- cbind(quantiles, quantiles_rev) 
+
+  return(list(ccm_ran_all = ccm_result_combined, ccm_ran_95ci = merged_data))
+}
+
+names(ccm_ran_summary) <- all_vars1
+#save.image(file=paste0("02_output/00_cache/",country_index,"_CCM-single_",country_name, ".RData") )
+```
+
+
+CCM to obtain null distributions.
+```{r chunk08_06_obtain_null_distributions}
+combined_data <- lapply(all_vars1, function(var) {
+  
+  ccm_obs  <- ccm_obs_summary[[var]] %>% mutate(method = "Observed")
+  
+  # 95CI
+  ccm_ebi_summary[[var]][["ccm_ebi_95ci"]] <- as.data.frame(ccm_ebi_summary[[var]][["ccm_ebi_95ci"]])
+  ccm_ebi_95ci <- ccm_ebi_summary[[var]][["ccm_ebi_95ci"]] %>% mutate(method = "Ebisuzaki", LibSize = ccm_obs$LibSize)
+  
+  ccm_sea_summary[[var]][["ccm_sea_95ci"]] <- as.data.frame(ccm_sea_summary[[var]][["ccm_sea_95ci"]])
+  ccm_sea_95ci <- ccm_sea_summary[[var]][["ccm_sea_95ci"]] %>% mutate(method = "Seasonal", LibSize = ccm_obs$LibSize)
+
+  ccm_ran_summary[[var]][["ccm_ran_95ci"]] <- as.data.frame(ccm_ran_summary[[var]][["ccm_ran_95ci"]])
+  ccm_ran_95ci <- ccm_ran_summary[[var]][["ccm_ran_95ci"]] %>% mutate(method = "Random", LibSize = ccm_obs$LibSize)
+  
+  # Bind the data frames
+  ccm_95ci <- bind_rows(ccm_obs, ccm_sea_95ci, ccm_ebi_95ci, ccm_ran_95ci) %>% mutate(RVI_type = var)
+  
+  # rho all
+  ccm_ebi_max <- ccm_ebi_summary[[var]][["ccm_ebi_all"]] %>%
+    mutate(method = "Ebisuzaki") %>% 
+    mutate(RVI_type = var)%>%
+    filter(LibSize == max_row)
+  
+  ccm_sea_max <- ccm_sea_summary[[var]][["ccm_sea_all"]]   %>% 
+    mutate(method = "Seasonal")  %>% 
+    mutate(RVI_type = var) %>%
+    filter(LibSize == max_row)
+  
+  ccm_obs_max <- ccm_obs %>% 
+    mutate(RVI_type = var) %>%
+    filter(LibSize == max_row)
+  
+   ccm_ran_max <- ccm_ran_summary[[var]][["ccm_ran_all"]]   %>% 
+    mutate(method = "Random")  %>% 
+    mutate(RVI_type = var) %>%
+    filter(LibSize == max_row)
+  
+  return(list(ccm_95ci = ccm_95ci, ccm_ebi_max = ccm_ebi_max, ccm_sea_max = ccm_sea_max, 
+              ccm_obs_max=ccm_obs_max, ccm_ran_max=ccm_ran_max))
+})
+
+ccm_95ci_country <- do.call(rbind, lapply(combined_data, function(x) x$ccm_95ci)) %>%
+  mutate(country = country_name) %>%
+  select(country, RVI_type, method, LibSize, everything())
+
+ccm_ebi_max_country <- do.call(rbind, lapply(combined_data, function(x) x$ccm_ebi_max)) %>%
+  mutate(country = country_name) %>%
+  select(country, RVI_type, method, LibSize, everything())
+
+ccm_sea_max_country <- do.call(rbind, lapply(combined_data, function(x) x$ccm_sea_max)) %>%
+  mutate(country = country_name) %>%
+  select(country, RVI_type, method, LibSize, everything())
+
+ccm_ran_max_country <- do.call(rbind, lapply(combined_data, function(x) x$ccm_ran_max)) %>%
+  mutate(country = country_name) %>%
+  select(country, RVI_type, method, LibSize, everything())
+
+ccm_obs_max_country <- do.call(rbind, lapply(combined_data, function(x) x$ccm_obs_max)) %>%
+  mutate(country = country_name) %>%
+  select(country, RVI_type, method, LibSize, rho, rho_rev)
+
+ccm_95ci_all <-  ccm_95ci_country
+ccm_ebi_max_all <-  ccm_ebi_max_country
+ccm_sea_max_all <- ccm_sea_max_country
+ccm_obs_max_all <-  ccm_obs_max_country
+ccm_ran_max_all <-  ccm_ran_max_country
+
+```
+
+
+## Surrogate-Based Significance Tests
+```{r chunk08_07_estimate_a_p-value}
+# Seasonal surrogate test
+ccm_sea_p <- do.call(rbind, lapply(all_vars1, function(var) {
+  sea_rho <- subset(ccm_sea_max_all, RVI_type == var)
+  obs_rho <- ccm_obs_max_all[which(ccm_obs_max_all$RVI_type==var), ]
+  p_sea <- 1 - ecdf(sea_rho$rho)(obs_rho$rho)
+  p_rev_sea <- 1 - ecdf(sea_rho$rho_rev)(obs_rho$rho_rev)
+  #p_value <- (sum(obs_rho$rho < sea_rho$rho) + 1) / (length(sea_rho$rho) + 1)
+  data.frame(RVI_type = var, p_sea = p_sea, p_rev_sea= p_rev_sea)
+}))
+
+print(ccm_sea_p)
+
+# Ebisuzaki surrogate test
+ccm_ebi_p <- do.call(rbind, lapply(all_vars1, function(var) {
+  ebi_rho <- subset(ccm_ebi_max_all, RVI_type == var)
+  obs_rho <- ccm_obs_max_all[which(ccm_obs_max_all$RVI_type==var), ]
+  p_ebi <- 1 - ecdf(ebi_rho$rho)(obs_rho$rho)
+  p_rev_ebi <- 1 - ecdf(ebi_rho$rho_rev)(obs_rho$rho_rev)
+  #p_value <- (sum(obs_rho$rho < sea_rho$rho) + 1) / (length(sea_rho$rho) + 1)
+  data.frame(RVI_type = var, p_ebi = p_ebi, p_rev_ebi= p_rev_ebi)
+}))
+
+print(ccm_ebi_p)
+
+# Random surrogate test
+ccm_ran_p <- do.call(rbind, lapply(all_vars1, function(var) {
+  ran_rho <- subset(ccm_ran_max_all, RVI_type == var)
+  obs_rho <- ccm_obs_max_all[which(ccm_obs_max_all$RVI_type==var), ]
+  p_ran <- 1 - ecdf(ran_rho$rho)(obs_rho$rho)
+  p_rev_ran <- 1 - ecdf(ran_rho$rho_rev)(obs_rho$rho_rev)
+  #p_value <- (sum(obs_rho$rho < sea_rho$rho) + 1) / (length(sea_rho$rho) + 1)
+  data.frame(RVI_type = var, p_ran = p_ran, p_rev_ran= p_rev_ran)
+}))
+
+print(ccm_ran_p)
+```
+
+##MannKendall test
+```{r chunk08_08_MannKendall}
+Kendall_p <- do.call(rbind, lapply(all_vars1, function(var) {
+  
+  Kendall_tau <- MannKendall(ccm_obs_summary[[var]]$rho)$tau
+  Kendall_p <- MannKendall(ccm_obs_summary[[var]]$rho)$sl
+  Kendall_rev_tau <- MannKendall(ccm_obs_summary[[var]]$rho_rev)$tau
+  Kendall_rev_p <- MannKendall(ccm_obs_summary[[var]]$rho_rev)$sl
+  
+  data.frame(RVI_type = var, Kendall_tau = Kendall_tau, Kendall_p = Kendall_p,
+              Kendall_rev_tau = Kendall_rev_tau, Kendall_rev_p = Kendall_rev_p
+             )
+}))
+
+print(Kendall_p)
+```
+
+
+## Organize and export CCM results
+```{r chunk08 output result}
+# Observed CCM results
+ccm_obs_max_all1 <- ccm_obs_max_all[,c("country", "RVI_type","LibSize", "rho","rho_rev"),]
+colnames(ccm_obs_max_all1)[4] <- "rho_actual"
+colnames(ccm_obs_max_all1)[5] <- "rho_actual_rev"
+Kendall_p1 <- Kendall_p[,c("RVI_type","Kendall_tau","Kendall_p" )]
+ccm_obs_max_all1 <- merge(ccm_obs_max_all1,Kendall_p1,by=c("RVI_type"),all.x = T)
+#Seasonal
+ccm_sea_max_all1 <- ccm_sea_max_all[,c("country", "RVI_type", "LibSize", "rho","rho_rev"),]
+colnames(ccm_sea_max_all1)[4] <- "rho_surr"
+colnames(ccm_sea_max_all1)[5] <- "rho_surr_rev"
+ccm_sea_p1 <- ccm_sea_p[,c( "RVI_type", "p_sea"),] 
+colnames(ccm_sea_p1)[2] <- "p_sign"
+ccm_sea_max_all1 <- merge(ccm_sea_max_all1,ccm_sea_p1,by=c("RVI_type"),all.x = T)
+ccm_out_sea1 <- merge(ccm_obs_max_all1,ccm_sea_max_all1,by=c("country", "RVI_type", "LibSize"),all.x = T)
+ccm_out_sea1$method <- "Seasonal"
+#Ebisuzaki
+ccm_ebi_max_all1 <- ccm_ebi_max_all[,c("country", "RVI_type", "LibSize", "rho","rho_rev"),]
+colnames(ccm_ebi_max_all1)[4] <- "rho_surr"
+colnames(ccm_ebi_max_all1)[5] <- "rho_surr_rev"
+ccm_ebi_p1 <- ccm_ebi_p[,c( "RVI_type", "p_ebi"),] 
+colnames(ccm_ebi_p1)[2] <- "p_sign"
+ccm_ebi_max_all1 <- merge(ccm_ebi_max_all1,ccm_ebi_p1,by=c("RVI_type"),all.x = T)
+ccm_out_ebi1 <- merge(ccm_obs_max_all1,ccm_ebi_max_all1,by=c("country", "RVI_type", "LibSize"),all.x = T)
+ccm_out_ebi1$method <- "Ebisuzaki"
+#Random
+ccm_ran_max_all1 <- ccm_ran_max_all[,c("country", "RVI_type", "LibSize", "rho","rho_rev"),]
+colnames(ccm_ran_max_all1)[4] <- "rho_surr"
+colnames(ccm_ran_max_all1)[5] <- "rho_surr_rev"
+ccm_ran_p1 <- ccm_ran_p[,c( "RVI_type", "p_ran"),] 
+colnames(ccm_ran_p1)[2] <- "p_sign"
+ccm_ran_max_all1 <- merge(ccm_ran_max_all1,ccm_ran_p1,by=c("RVI_type"),all.x = T)
+ccm_out_ran1 <- merge(ccm_obs_max_all1,ccm_ran_max_all1,by=c("country", "RVI_type", "LibSize"),all.x = T)
+ccm_out_ran1$method <- "Random"
+
+ccm_out_res1 <- rbind(ccm_out_sea1,ccm_out_ebi1,ccm_out_ran1)
+ccm_out_res1 <- ccm_out_res1 %>% 
+  separate(RVI_type, into = c("X1", "X2"), sep = ":", remove = FALSE)
+ccm_out_res1$RVI_type <- paste0(ccm_out_res1$X2," drives ", ccm_out_res1$X1)
+ccm_out_res1$RVI_type1 <- paste0(ccm_out_res1$X1,":", ccm_out_res1$X2)
+ccm_out_res1 <- ccm_out_res1 %>%
+  select(-X1, -X2)
+
+
+ccm_out_res3 <- ccm_out_res1
+
+out_path0 <- "02_output/02_CCM/02_single_CCM/01_single_CCM_country_result"
+dir.create(out_path0)
+write.csv(ccm_out_res3,paste(out_path0,"/", country_index, "_single_ccm_result_", country_name,".csv", sep=""),row.names = F)
+```
+
+

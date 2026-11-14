@@ -1,0 +1,118 @@
+---
+title: "Indirect effect of influenza vaccination coverage on the circulation of respiratory viruses"
+header-includes:
+   - \usepackage{float}
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 2
+#bibliography: ref.bib
+---
+
+\floatplacement{figure}{H}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      cache = TRUE,
+                      fig.width = 6,
+                      fig.height = 4,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+### Set up  
+If necessary, we can clear the environment to start with a clean workspace.
+```{r chunk1}
+rm(list=ls())
+```
+
+Load packages.
+```{r packages, warning=FALSE, message=FALSE}
+source("01_load_package.R")
+```
+
+Set the drawing theme.
+```{r chunk2}
+source("02_plot_theme.R")
+```
+
+Create a folder to save the results.
+```{r chunk3}
+dir.create("02_output")
+outpath <-  "02_output/"
+
+dir.create(paste0(outpath,"00_cache"))
+dir.create(paste0(outpath,"00_cache/00_html"))
+
+dir.create(paste0(outpath,"01_parameter_selection"))
+dir.create(paste0(outpath,"01_parameter_selection/01_Cross-Correlation"))
+dir.create(paste0(outpath,"01_parameter_selection/02_Best-E"))
+dir.create(paste0(outpath,"01_parameter_selection/03_Nonlinear"))
+
+dir.create(paste0(outpath,"02_CCM"))
+dir.create(paste0(outpath,"02_CCM/01_Null_Model_Data"))
+dir.create(paste0(outpath,"02_CCM/02_single_CCM"))
+dir.create(paste0(outpath,"02_CCM/03_mul_CCM"))
+```
+
+Create a database to store the parameters.
+```{r chunk4}
+ccm_parameter_all <- c()
+
+ccm_95ci_all0 <- c()
+ccm_ebi_max_all0 <- c()
+ccm_sea_max_all0 <- c()
+ccm_obs_max_all0 <- c()
+
+Mul_ccm_obs<-c()
+Mul_ccm_ebi <- c()
+Mul_ccm_sea <- c()
+```
+
+# Parallel computing
+```{r chunk5}
+available_cores <- detectCores(logical = FALSE)
+used_cores <- available_cores - 8 # If you need to retain some core, you can adjust this number
+cl <- makeCluster(used_cores)
+registerDoParallel(cl)
+
+all_current_datetime <- Sys.time()
+all_start_time <- all_current_datetime
+```
+
+```{r chunk6}
+for (country_index in c(1:37)) { 
+  current_datetime <- Sys.time()
+  start_time <- current_datetime
+
+  cat("Running analysis for Country ", country_index, " at ", format(current_datetime, format = "%Y-%m-%d %H:%M:%S"), "\n")
+
+  outpath_html <- file.path("02_output/00_cache/00_html", paste0(country_index, "_country"))
+  dir.create(outpath_html, recursive = TRUE, showWarnings = FALSE)
+
+  capture.output(render(input = "05_sin_tau_climate.Rmd", output_dir = outpath_html))
+  capture.output(render(input = "06_sin_E_Tp_theta_climate.Rmd", output_dir = outpath_html))
+  capture.output(render(input = "07_data_surrogate_null_climate.Rmd", output_dir = outpath_html))
+  capture.output(render(input = "08_sin_ccm_NRVI_climate.Rmd", output_dir = outpath_html))
+  capture.output(render(input = "09_mul_ccm_NRVI_climate.Rmd", output_dir = outpath_html))
+  capture.output(render(input = "10_Scenario_Exploration_climate.Rmd", output_dir = outpath_html))
+  current_datetime <- Sys.time()
+  end_time <- current_datetime
+
+  # Calculate total time (in hours)
+  execution_time <- difftime(end_time, start_time, units = "hours")
+  cat("Country ", country_index, " completed at ", format(current_datetime, format = "%Y-%m-%d %H:%M:%S"), "\n")
+  cat("Total execution time: ", execution_time, " hours\n")
+}
+
+all_current_datetime <- Sys.time()
+all_end_time <- all_current_datetime
+all_execution_time <- difftime(all_end_time, all_start_time, units = "hours")
+cat("All execution time: ", all_execution_time, " hours\n")
+
+stopCluster(cl)
+```
+
+
+
+

@@ -1,0 +1,308 @@
+---
+title: "Indirect effect of influenza vaccination coverage on the circulation of respiratory viruses"   
+subtitle: "Pre-COVID-19 period (2016–2019): Fig.3, Supplementary Figs.S14"
+output: html_document
+---
+If necessary, we can clear the environment to start with a clean workspace.
+```{r}
+rm(list=ls())
+source("01_load_package.R")
+source("02_plot_theme.R")
+out_path1 <- "02_output/Fig3_precovid"
+dir.create(out_path1)
+```
+
+## Load and merge country-level EDM results
+```{r eval=FALSE}
+if (FALSE) {
+# Load country-level EDM results
+folder_path <- "02_output/02_CCM/03_mul_CCM/01_mul_CCM_country_result"
+csv_files <- list.files(path = folder_path, pattern =  "obs.*\\.csv$", full.names = TRUE)
+data_list <- lapply(csv_files, read.csv)
+
+Mul_ccm_obs_all <- do.call(rbind, data_list)
+Mul_ccm_obs_all[which(Mul_ccm_obs_all$rho<0),"rho"] <- 0
+Mul_ccm_obs_all$flu_type <-  sapply(strsplit(Mul_ccm_obs_all$mul_drivers, " "), function(x) x[2])
+
+# Retain variables required for subsequent analyses
+Mul_ccm_obs_all <- Mul_ccm_obs_all %>%
+  dplyr::select(
+    country, var_num, var_col, name_1,
+    mul_drivers, rho, MAE, RMSE, flu_type
+  )
+
+## Save results to avoid processing numerous country-level files
+saveRDS(
+  Mul_ccm_obs_all,
+  "02_output/Multivariate_EDM_preCOVID_input.rds",
+  compress = "xz"
+)
+}
+```
+
+## Load precomputed multivariate EDM results
+```{r}
+# Load saved EDM results to avoid processing numerous country-level files
+Mul_ccm_obs_all <- readRDS("02_output/Multivariate_EDM_preCOVID_input.rds")
+```
+
+
+## Calculate multivariate EDM forecast improvement
+```{r}
+# Extract univariate baselines
+baseline <- Mul_ccm_obs_all %>%
+  filter(var_num == 1)%>%
+  group_by(country, var_col) %>%
+  select(country, var_col,rho, MAE, RMSE) %>%
+  distinct(country, var_col, .keep_all = TRUE)
+colnames(baseline)[2] <- "var_id"
+
+result <- Mul_ccm_obs_all %>%
+  filter(var_num > 1) %>%
+  select(country, var_col, rho, MAE, RMSE,name_1,flu_type) %>%
+  distinct()
+result$name_1 <- gsub("\\([^)]+\\)", "", result$name_1)
+colnames(result)[6] <-  "var_id"
+# Calculate prediction improvement
+delta_Mul_ccm_obs <- result %>%
+  left_join(baseline, by = c("country","var_id"), suffix = c("", "_baseline")) %>%
+  mutate(
+    delta_rho = rho - rho_baseline,
+    delta_MAE = MAE - MAE_baseline,
+    delta_RMSE = RMSE - RMSE_baseline
+  ) 
+# Summarize means and 95% CI
+delta_obs_95ci <- delta_Mul_ccm_obs %>%
+  group_by(var_col,flu_type) %>%
+  summarise(
+    delta_rho_mean = mean(delta_rho),
+    delta_rho_ci_lower = quantile(delta_rho, 0.025),
+    delta_rho_ci_upper = quantile(delta_rho, 0.975),
+    
+    delta_RMSE_mean = mean(delta_RMSE),
+    delta_RMSE_ci_lower = quantile(delta_RMSE, 0.025),
+    delta_RMSE_ci_upper = quantile(delta_RMSE, 0.975),    
+  ) %>%
+  arrange(match(var_col, delta_Mul_ccm_obs$var_col))
+delta_obs_95ci$var_id <-   sub(",.*", "", delta_obs_95ci$var_col)
+
+```
+
+# Prepare data for plotting
+```{r fig.width=30, fig.height=20, dpi=300}
+delta_obs_95ci$var_col <- factor(delta_obs_95ci$var_col, levels = unique(delta_obs_95ci$var_col))
+delta_obs_95ci <- delta_obs_95ci[which(delta_obs_95ci$var_id=="RSV"|delta_obs_95ci$var_id=="PIV"|
+                                       delta_obs_95ci$var_id=="RV"|delta_obs_95ci$var_id=="ADV"|
+                                       delta_obs_95ci$var_id=="HMPV"),]
+delta_obs_95ci$var_col1 <- delta_obs_95ci$var_col
+delta_obs_95ci$var_col <- sub("^[^,]*,\\s*", "", delta_obs_95ci$var_col)
+```
+
+## Figure 3A: Pre-COVID-19 (IAV)
+```{r fig.width=26, fig.height=15, dpi=300}
+delta_obs_flu_IAV <- subset(delta_obs_95ci, flu_type =="INF_A")
+plot_mul_obs_ccm_IAV <- list()
+max_mean <- max(delta_obs_flu_IAV$delta_rho_ci_upper)
+min_mean <- min(delta_obs_flu_IAV$delta_rho_ci_lower)
+
+virus_name<- c("RSV","PIV","RV","ADV","HMPV")
+n = length(virus_name)
+for(j in c(1:n))
+{
+  print(virus_name[j])
+  D1 <- subset(delta_obs_flu_IAV, var_id == virus_name[j])
+
+max_level <- D1 %>%
+  group_by(var_id) %>%
+  summarise(max_delta_rho_mean = max(delta_rho_mean, na.rm = TRUE))
+
+max_ci_upper <- ceiling( max_mean * 10) / 10 
+min_ci_upper <- floor( min_mean * 10) / 10
+
+D1$var_col <- gsub(",", "+", D1$var_col)
+D1$var_col <- gsub("INF_A", "IAV", D1$var_col)
+D1$var_col <- gsub("Temp", "T", D1$var_col)
+D1$var_col <- gsub("Vaccine", "V", D1$var_col)
+D1$var_col <- gsub("\\s+", "", D1$var_col)
+
+D1 <- D1 %>%
+  mutate(is_vaccine = case_when(
+    var_col == "V" ~ "V",
+    var_col == "T+AH" ~ "T + AH",
+    var_col == "IAV+V+T+AH" ~ "IAV + V + T + AH",
+    TRUE ~ "Other"  
+  ))
+
+D1 <- D1 %>%
+  arrange(delta_rho_mean)
+D1$var_col <- factor(D1$var_col, levels = unique(D1$var_col))
+
+p1 <- ggplot(D1, aes(y = var_col, x = delta_rho_mean)) +
+  geom_errorbar(aes(xmin = delta_rho_ci_lower, xmax = delta_rho_ci_upper, color = is_vaccine), width = 0.3, size = 1.2) +
+  geom_point(aes(color = is_vaccine), size = 6, stroke = 1)+
+  facet_wrap(~var_id, scales = "free_x", nrow = 2) + 
+  geom_vline(xintercept =0 , linetype = "dashed", color = "black",size=1) +
+  coord_cartesian(xlim = c(min_ci_upper, max_ci_upper)) +
+  scale_x_continuous(name = "Improved cross mapping skill (p)", limits = c(-0.5,1),breaks  = seq(-0.5,1,0.5)) +
+  scale_y_discrete(name = "") +
+  labs(y = NULL, color = "", fill = "",title = "") +
+  scale_color_manual(values = c("V" = "#f29f5f", 
+                                 "T + AH" = '#1b9e77', 
+                                 "IAV + V + T + AH" = "#ca6589", 
+                                 "Other" = '#7f8c8d')) + 
+  mytheme +
+  theme(plot.margin=unit(c(0.5,0,0.5,0),'lines'))+
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank(),
+    strip.text = element_text(size = 20, face = "bold", color = "black"), 
+    strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+p1
+plot_mul_obs_ccm_IAV[[j]] <- p1
+
+}
+
+p1_IAV <- grid.arrange(grobs = plot_mul_obs_ccm_IAV, ncol = 5)
+
+ggsave(p1_IAV,filename = file.path(paste0(out_path1,"/Fig3A_IAV_precovid.pdf")),
+         width = 18,height =6.5,device   = cairo_pdf,  family   = "Arial") 
+```
+
+## Supplementary Fig.S14A: Pre-COVID-19 (IV)
+```{r fig.width=26, fig.height=15, dpi=300}
+delta_obs_flu_all <- subset(delta_obs_95ci, flu_type =="INF_ALL")
+plot_mul_obs_ccm_all <- list()
+
+virus_name<- c("RSV","PIV","RV","ADV","HMPV")
+n = length(virus_name)
+for(j in c(1:n))
+{
+  print(virus_name[j])
+  D1 <- subset(delta_obs_flu_all, var_id == virus_name[j])
+max_mean <- max(delta_obs_95ci$delta_rho_ci_upper)
+min_mean <- min(delta_obs_95ci$delta_rho_ci_lower)
+max_level <- D1 %>%
+  group_by(var_id) %>%
+  summarise(max_delta_rho_mean = max(delta_rho_mean, na.rm = TRUE))
+
+max_ci_upper <- ceiling( max_mean * 10) / 10 
+min_ci_upper <- floor( min_mean * 10) / 10
+
+D1$var_col <- gsub(",", "+", D1$var_col)
+D1$var_col <- gsub("INF_ALL", "IV", D1$var_col)
+D1$var_col <- gsub("Temp", "T", D1$var_col)
+D1$var_col <- gsub("Vaccine", "V", D1$var_col)
+D1$var_col <- gsub("\\s+", "", D1$var_col)
+
+D1 <- D1 %>%
+  mutate(is_vaccine = case_when(
+    var_col == "V" ~ "V",
+    var_col == "T+AH" ~ "T + AH",
+    var_col == "IV+V+T+AH" ~ "IV + V + T + AH",
+    TRUE ~ "Other"
+  ))
+
+D1 <- D1 %>%
+  arrange(delta_rho_mean)
+D1$var_col <- factor(D1$var_col, levels = unique(D1$var_col))
+
+p1 <- ggplot(D1, aes(y = var_col, x = delta_rho_mean)) +
+  geom_errorbar(aes(xmin = delta_rho_ci_lower, xmax = delta_rho_ci_upper, color = is_vaccine), width = 0.3, size = 1.2) +
+  geom_point(aes(color = is_vaccine), size = 6, stroke = 1)+
+  facet_wrap(~var_id, scales = "free_x", nrow = 2) + 
+  geom_vline(xintercept =0 , linetype = "dashed", color = "black",size=1) +
+  coord_cartesian(xlim = c(min_ci_upper, max_ci_upper)) +
+  scale_x_continuous(name = "Improved cross mapping skill (p)", limits = c(-0.5,1),breaks  = seq(-0.5,1,0.5)) +
+  scale_y_discrete(name = "") +
+  labs(y = NULL, color = "", fill = "",title = "") +
+   scale_color_manual(values = c("V" = "#f29f5f", 
+                                 "T + AH" = '#1b9e77', 
+                                 "IV + V + T + AH" = "#ca6589", 
+                                 "Other" = '#7f8c8d')) +  
+  mytheme +
+  theme(plot.margin=unit(c(0.5,0,0.5,0),'lines'))+
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank(),
+    strip.text = element_text(size = 20, face = "bold", color = "black"), 
+    strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+p1
+plot_mul_obs_ccm_all[[j]] <- p1
+
+}
+
+
+p1_IV <- grid.arrange(grobs = plot_mul_obs_ccm_all, ncol = 5)
+
+ggsave(p1_IV,filename = file.path(paste0(out_path1,"/FigS14A_IV_precovid.pdf")),
+         width = 18,height =5.5,device   = cairo_pdf,  family   = "Arial") 
+
+```
+
+
+
+## Supplementary Fig.S14B: Pre-COVID-19 (IBV)
+```{r fig.width=26, fig.height=15, dpi=300}
+delta_obs_flu_IBV <- subset(delta_obs_95ci, flu_type =="INF_B")
+plot_mul_obs_ccm_IBV <- list()
+max_mean <- max(delta_obs_95ci$delta_rho_ci_upper)
+min_mean <- min(delta_obs_95ci$delta_rho_ci_lower)
+virus_name<- c("RSV","PIV","RV","ADV","HMPV")
+n = length(virus_name)
+for(j in c(1:n))
+{
+  print(virus_name[j])
+  D1 <- subset(delta_obs_flu_IBV, var_id == virus_name[j])
+
+max_level <- D1 %>%
+  group_by(var_id) %>%
+  summarise(max_delta_rho_mean = max(delta_rho_mean, na.rm = TRUE))
+
+max_ci_upper <- ceiling( max_mean * 10) / 10 
+min_ci_upper <- floor( min_mean * 10) / 10
+
+D1$var_col <- gsub(",", "+", D1$var_col)
+D1$var_col <- gsub("INF_B", "IBV", D1$var_col)
+D1$var_col <- gsub("Temp", "T", D1$var_col)
+D1$var_col <- gsub("Vaccine", "V", D1$var_col)
+D1$var_col <- gsub("\\s+", "", D1$var_col)
+
+D1 <- D1 %>%
+  mutate(is_vaccine = case_when(
+    var_col == "V" ~ "V",
+    var_col == "T+AH" ~ "T + AH",
+    var_col == "IBV+V+T+AH" ~ "IBV + V + T + AH",
+    TRUE ~ "Other" 
+  ))
+
+D1 <- D1 %>%
+  arrange(delta_rho_mean)
+D1$var_col <- factor(D1$var_col, levels = unique(D1$var_col))
+
+p1 <- ggplot(D1, aes(y = var_col, x = delta_rho_mean)) +
+  geom_errorbar(aes(xmin = delta_rho_ci_lower, xmax = delta_rho_ci_upper, color = is_vaccine), width = 0.3, size = 1.2) +
+  geom_point(aes(color = is_vaccine), size = 6, stroke = 1)+
+  facet_wrap(~var_id, scales = "free_x", nrow = 2) + 
+  geom_vline(xintercept =0 , linetype = "dashed", color = "black",size=1) +
+  coord_cartesian(xlim = c(min_ci_upper, max_ci_upper)) +
+  scale_x_continuous(name = "Improved cross mapping skill (p)", limits = c(-0.5,1),breaks  = seq(-0.5,1,0.5)) +
+  scale_y_discrete(name = "") +
+  labs(y = NULL, color = "", fill = "",title = "") +
+  scale_color_manual(values = c("V" = "#f29f5f", 
+                                 "T + AH" = '#1b9e77', 
+                                 "IBV + V + T + AH" = "#ca6589", 
+                                 "Other" = '#7f8c8d')) + 
+  mytheme +
+  theme(plot.margin=unit(c(0.5,0,0.5,0),'lines'))+
+  theme(panel.grid.major.x=element_blank(),panel.grid.major.y=element_blank(),
+    strip.text = element_text(size = 20, face = "bold", color = "black"), 
+    strip.background = element_rect(fill = "gray90", color = "black", size = 0.5))
+p1
+plot_mul_obs_ccm_IBV[[j]] <- p1
+
+}
+
+p1_IBV <- grid.arrange(grobs = plot_mul_obs_ccm_IBV, ncol = 5)
+
+ggsave(p1_IBV,filename = file.path(paste0(out_path1,"/FigS14B_IBV_precovid.pdf")),
+         width = 19,height =5.5,device   = cairo_pdf,  family   = "Arial")  
+```
+
+
+

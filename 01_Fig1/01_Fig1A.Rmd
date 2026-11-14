@@ -1,0 +1,152 @@
+---
+title: "Indirect effect of influenza vaccination coverage on the circulation of respiratory viruses"
+subtitle: "Figure 1A: Respiratory virus circulation (2016–2024)"
+output: html_document
+---
+## Load packages and set plotting theme
+```{r}
+rm(list = ls())
+library(dplyr);library(tidyverse);library(tidyr);library(lubridate);library(ggpubr)
+library(anytime);library(reshape2);library(ggplot2);library(RColorBrewer);library(readxl)
+library(gridExtra);library(grid);library(purrr);library(entropy)
+source("../plot_theme.R")
+options(scipen = 999)
+
+out_path1 <- "output"
+dir.create(out_path1, recursive = TRUE, showWarnings = FALSE)
+```
+
+## Prepare and save Figure 1 summary data
+```{r eval=FALSE}
+# Load and prepare data.
+if (FALSE) {
+dat <- read.csv("../00_data/multi_vaccine_cases_climate.csv")
+dat$HEMISPHERE <- ifelse(dat$cen_lat > 0, "NH", "SH")
+
+dat  <-  dat %>%
+  filter((year >= 2016 & year <= 2024)) 
+
+dir.create(out_path1)
+dat_rsv = subset(dat ,dat$virus=="RSV")
+dat_inf <- dat_rsv
+dat_inf$cases <- dat_inf$INF_ALL
+dat_inf$AAP <- dat_inf$flu_AAP
+dat_inf$virus <- "IV"
+
+dat_infA <- dat_rsv
+dat_infA$cases <- dat_infA$INF_A
+dat_infA$AAP <- dat_infA$fluA_AAP
+dat_infA$virus <- "IAV"
+
+dat_infB <- dat_rsv
+dat_infB$AAP <- dat_infB$fluB_AAP
+dat_infB$cases <- dat_infB$INF_B
+dat_infB$virus <- "IBV"
+dat1 <- subset(dat ,!dat$virus=="RSV")
+dat2 <- rbind(dat1,dat_inf,dat_infA,dat_infB,dat_rsv)
+
+# Calculate summary statistics of AAP and cases by virus, hemisphere, and time
+res_aap_group <- dat2 %>%
+  group_by(virus,HEMISPHERE,year_decimal) %>%
+  summarise(
+    mean_AAP = mean(AAP, na.rm = TRUE),                     # Mean 
+    Q2.5_AAP = quantile(AAP, 0.025, na.rm = TRUE),          # 2.5th percentile
+    median_AAP = median(AAP, na.rm = TRUE),                 # Median
+    Q97.5_AAP = quantile(AAP, 0.975, na.rm = TRUE),         # 97.5th percentile
+    
+    mean_cases = mean(cases, na.rm = TRUE),                 # Mean 
+    Q2.5_cases = quantile(cases, 0.025, na.rm = TRUE),      # 2.5th percentile
+    median_cases = median(cases, na.rm = TRUE),             # Median
+    Q97.5_cases = quantile(cases, 0.975, na.rm = TRUE)      # 97.5th percentile
+  )
+
+# Save summary statistics for Figure 1
+saveRDS(
+  res_aap_group,
+  "Fig1A_summary.rds",
+  compress = "xz"
+)
+}
+```
+## Load precomputed Figure 1A summary data
+```{r}
+# Load results
+res_aap_group <- readRDS("Fig1A_summary.rds")
+```
+
+## Plot Figure 1A
+```{r fig.width=18.2, fig.height=8, dpi=300}
+virus_select <- c("IAV","IBV","RSV","PIV","RV","ADV","HMPV")
+res_aap_subset <- subset(res_aap_group, virus %in% virus_select)
+
+cols <- c("#00A087B2","#3C5488FF","#FED439B2","#c25b88","#4DBBD5FF","#B09C85B2","#E64B35BF")
+
+res_aap_NH <- subset(res_aap_subset, res_aap_subset$HEMISPHERE == "NH")
+res_aap_NH_IAV <- subset(res_aap_group, res_aap_group$HEMISPHERE == "NH"&res_aap_group$virus == "IAV")
+res_aap_NH$virus <- factor(res_aap_NH$virus,levels = virus_select,ordered=TRUE)
+
+K_NH     <- max(res_aap_NH$median_cases, na.rm = TRUE)
+coef_NH  <- 800 / (100 * K_NH)
+
+# Plot Figure 1A
+p1_nh <- 
+  ggplot(res_aap_NH, aes(x =  year_decimal, y = median_cases, color=virus,fill = virus)) +
+  geom_bar(stat = "identity", position = "stack",alpha=0.7) +
+  geom_point(data = res_aap_NH_IAV,  aes(x = year_decimal, 
+                y = median_AAP * (K_NH * coef_NH)),stroke = 2,  
+            size = 3, alpha = 0.7,inherit.aes = FALSE,shape=21,fill="#00A087B2",color="black")+
+  geom_vline(aes(xintercept=2020.16),lty='dashed',colour ="black",linewidth=1)+
+  geom_vline(aes(xintercept=2023.333),lty='dashed',colour ="black",linewidth=1)+
+  scale_y_continuous(limits  = c(0, 800),expand  = c(0, 0),
+    sec.axis = sec_axis(~./(K_NH * coef_NH),name   = "RP of IAV detections (%)",breaks = seq(0, 100, 25)))+
+  scale_x_continuous(breaks = seq(2016, 2025,1),expand = c(0, 0.25))+
+  labs(title = "Northern Hemisphere",x = "",y = "Positive detections") +
+  mytheme +
+  theme(panel.grid.major.y=element_blank(),
+        strip.text = element_text(size = 20, face = "bold"))+
+  theme(panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank())+ 
+  scale_color_manual(name = '',values = cols  )+
+  scale_fill_manual(name = '',values = cols  )+
+  guides(fill=guide_legend(nrow=1,byrow = T),color=guide_legend(nrow=1,byrow = T))
+p1_nh
+
+
+res_aap_SH <- subset(res_aap_subset, res_aap_subset$HEMISPHERE == "SH")
+res_aap_SH_IAV <- subset(res_aap_group, res_aap_group$HEMISPHERE == "SH"&res_aap_group$virus == "IAV")
+res_aap_SH$virus <- factor(res_aap_SH$virus,levels = virus_select,ordered=TRUE)
+K_SH     <- max(res_aap_SH$median_cases, na.rm = TRUE)
+coef_SH  <- 2050 / (100 * K_SH)
+
+p1_sh <- 
+  ggplot(res_aap_SH, aes(x =  year_decimal, y = median_cases, color=virus,fill = virus)) +
+  geom_bar(stat = "identity", position = "stack",alpha=0.7) +
+  geom_point(data = res_aap_SH_IAV, aes(x = year_decimal, 
+                y = median_AAP * (K_SH * coef_SH)),stroke = 2, 
+            size = 3, alpha = 0.7,inherit.aes = FALSE,shape=21,fill="#00A087B2",color="black")+
+  geom_vline(aes(xintercept=2020.16),lty='dashed',colour ="black",linewidth=1)+
+  geom_vline(aes(xintercept=2023.333),lty='dashed',colour ="black",linewidth=1)+
+  scale_y_continuous( limits = c(0, 2050),expand = c(0, 0),
+                      sec.axis = sec_axis(~./(K_SH * coef_SH),name='RP of IAV detections (%)',breaks = seq(0, 100, 25)))+
+  scale_x_continuous(breaks = seq(2016, 2025,1),expand = c(0, 0.25))+
+  labs(title = "Southern Hemisphere",x = "",y = "Positive detections") +
+  mytheme +
+  theme(panel.grid.major.y=element_blank(),
+        strip.text = element_text(size = 20, face = "bold"))+
+  theme(panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank())+ 
+  scale_color_manual(name = '',values = cols  )+
+  scale_fill_manual(name = '',values = cols  )+
+  guides(fill=guide_legend(nrow=1,byrow = T),color=guide_legend(nrow=1,byrow = T))
+p1_sh
+
+fig1 <-ggarrange(p1_nh, p1_sh,ncol =1, nrow = 2,heights = c(1,1),
+                 labels = c("A","B"),  hjust=-1, vjust=1.5,align = "hv",
+                 legend = "bottom", common.legend = T,
+                 font.label = list(size = 24, face = "bold"))
+fig1 
+
+ggsave(filename = file.path(out_path1, "/Fig1A.pdf"),
+       plot     = fig1,width    = 18.2,height   = 8,device   = cairo_pdf, family   = "Arial")
+
+```
