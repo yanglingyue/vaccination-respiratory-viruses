@@ -67,9 +67,9 @@ INLA-DLNM analyses can take substantial time. To reproduce the figures without r
 
 #### Visualization of INLA-DLNM results
 
-| Script | Figures |
+| Figures | Script |
 | --- | --- |
-| `03_plot_Fig5.Rmd` | Figure 5 |
-| `04_plot_FIgS17.Rmd` | Figure S17 |
-| `05_plot_FigS18.Rmd` | Figure S18 |
-| `06_plot_FigS19.Rmd` | Figure S19 |
+| Figure 5 | `03_plot_Fig5.Rmd` |
+| Figure S17 | `04_plot_FIgS17.Rmd` |
+| Figure S18 | `05_plot_FigS18.Rmd` |
+| Figure S19 | `06_plot_FigS19.Rmd` |
