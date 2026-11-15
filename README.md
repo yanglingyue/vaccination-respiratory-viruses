@@ -67,6 +67,8 @@ INLA-DLNM analyses can take substantial time. To reproduce the figures without r
 
 #### Visualization of INLA-DLNM results
 
+The following scripts generate figures for both the pre- and post-COVID-19 periods.
+
 | Figures | Script |
 | --- | --- |
 | Figure 5 | `03_plot_Fig5.Rmd` |
