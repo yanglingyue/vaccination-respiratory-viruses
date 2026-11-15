@@ -33,7 +33,7 @@ All analyses were conducted in R (version 4.5.2). The main packages used were:
 
 ### Figures 2–4
 
-For the pre- or post-COVID-19 period, open the corresponding folder under `02_Fig2_4/` and run `03_main.Rmd`.
+For the pre- or post-COVID-19 period, open the corresponding folder under `02_Fig2_4/` and run `03_main.Rmd`, which calls the analysis scripts.
 
 Alternatively, run the following commands in a terminal from that folder to execute `03_main_temp.Rmd`:
 
@@ -44,21 +44,32 @@ chmod +x run_rEDM_script2.csh
 
 EDM analyses can take substantial time. To reproduce the figures without rerunning the analyses, use the precomputed results in each project's `02_output/` folder and run the plotting scripts below.
 
-#### Visualization of EDM results for the pre-COVID-19 pandemic period
+#### Visualization of EDM results
+
+| Figures | Pre-COVID-19 | Post-COVID-19 |
+| --- | --- | --- |
+| Figure 2 and Figures S12–S13 | `11_plot_Fig2_S12_S13_precovid.Rmd` | `11_plot_Fig2_FigS12_S13_postcovid.Rmd` |
+| Figure 3 and Figure S14 | `12_plot_Fig3A_S14_precovid.Rmd` | `12_plot_Fig3B_FigS14_postcovid.Rmd` |
+| Figure 4 and Figure S15 | `13_plot_Fig4A_S15_precovid.Rmd` | `13_plot_Fig4B_S15_postcovid.Rmd` |
+| Figure S16 | `14_plot_FigS16_precovid.Rmd` | `14_plot_FigS16_post_covid.Rmd` |
+
+### Figure 5
+
+For the pre- or post-COVID-19 period, set the working directory to `03_Fig5/` and run the corresponding scripts:
+
+| Analysis | Pre-COVID-19 | Post-COVID-19 |
+| --- | --- | --- |
+| Fit models | `01_pre_run_models_IAV.R` | `01_post_run_models_IAV.R` |
+| Save model outputs for plotting | `02_pre_plot_output_IAV.R` | `02_post_plot_output_IAV.R` |
+| Cross-validation | `0x_run_pre_leave_month_out.R` | `0x_run_post_leave_month_out.R` |
+
+INLA-DLNM analyses can take substantial time. To reproduce the figures without rerunning the analyses, use the precomputed results and run the plotting scripts below.
+
+#### Visualization of INLA-DLNM results
 
 | Script | Figures |
 | --- | --- |
-| `11_plot_Fig2_S12_S13_precovid.Rmd` | Figure 2 and Figures S12–S13 |
-| `12_plot_Fig3A_S14_precovid.Rmd` | Figure 3A and Figure S14 |
-| `13_plot_Fig4A_S15_precovid.Rmd` | Figure 4A and Figure S15 |
-| `14_plot_FigS16_precovid.Rmd` | Figure S16 |
-
-#### Visualization of EDM results for the post-COVID-19 pandemic period
-
-| Script | Figures |
-| --- | --- |
-| `11_plot_Fig2_FigS12_S13_postcovid.Rmd` | Figure 2 and Figures S12–S13 |
-| `12_plot_Fig3B_FigS14_postcovid.Rmd` | Figure 3B and Figure S14 |
-| `13_plot_Fig4B_S15_postcovid.Rmd` | Figure 4B and Figure S15 |
-| `14_plot_FigS16_post_covid.Rmd` | Figure S16 |
-
+| `03_plot_Fig5.Rmd` | Figure 5 |
+| `04_plot_FIgS17.Rmd` | Figure S17 |
+| `05_plot_FigS18.Rmd` | Figure S18 |
+| `06_plot_FigS19.Rmd` | Figure S19 |
